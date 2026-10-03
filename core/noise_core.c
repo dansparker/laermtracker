@@ -30,9 +30,9 @@ void nc_civil_from_ms(int64_t ms, int *y, int *mo, int *d, int *h, int *mi, int 
 
 static void fmt1(char *out, size_t sz, float v)         /* "-12.3" ohne Float-printf */
 {
-    long t = lroundf(v * 10.0f);
-    long a = t < 0 ? -t : t;
-    snprintf(out, sz, "%s%ld.%ld", t < 0 ? "-" : "", a / 10, a % 10);
+    int t = (int)lroundf(v * 10.0f);
+    int a = t < 0 ? -t : t;
+    snprintf(out, sz, "%s%d.%d", t < 0 ? "-" : "", a / 10, a % 10);
 }
 
 static void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
@@ -374,7 +374,8 @@ static void start_event(nc_t *n, float L, float laf, float lpk, double meansq)
     uint32_t pre = n->cfg.pre_ms / 10;
     if (pre > n->frames_seen - 1) pre = n->frames_seen - 1;
     if (pre > n->hist_n - 1) pre = n->hist_n - 1;
-    if (pre > ring_frames / 2) pre = ring_frames / 2;
+    uint32_t pre_max = ring_frames > 50 ? ring_frames - 50 : ring_frames / 2;   /* 0.5 s Reserve fuer SD-Wartezeiten */
+    if (pre > pre_max) pre = pre_max;
     pre = pre / 10 * 10;
     n->ev_pre_frames = pre;
     n->rd = n->wr - (uint64_t)n->frame_len * (pre + 1);

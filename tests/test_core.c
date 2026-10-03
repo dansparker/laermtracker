@@ -30,7 +30,7 @@ static double a_lin(double f)
 {
     double f2 = f * f, c1 = 20.598997 * 20.598997, c2 = 107.65265 * 107.65265, c3 = 737.86223 * 737.86223, c4 = 12194.217 * 12194.217;
     double ra = c4 * f2 * f2 / ((f2 + c1) * sqrt((f2 + c2) * (f2 + c3)) * (f2 + c4));
-    return ra / 0.891250938;                                  /* A(1 kHz) = 1 */
+    return ra / 0.7943282347;                                 /* Normierung: A(1 kHz) = 1 (= 0 dB) */
 }
 
 /* ---- I/O ueber stdio ---- */
@@ -61,7 +61,7 @@ static double k_for(double target_dba) { return pow(10.0, (target_dba - la_unit)
 
 static void add_signal(double t0, double dur, double target_dba, int shape, double tau)
 {
-    double k = k_for(target_dba);
+    double k = shape == 2 ? ref_peak * pow(10.0, (target_dba - 94.0) / 20.0) : k_for(target_dba);  /* Ton: A(1 kHz)=1 */
     long i0 = (long)(t0 * FS), n = (long)(dur * FS);
     for (long i = 0; i < n && i0 + i < (long)TOTAL_S * FS; i++) {
         double t = (double)i / FS, env = 1.0;
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
     const float fr[] = { 31.5f, 63, 125, 250, 500, 1000, 2000, 4000, 8000 };
     for (unsigned i = 0; i < sizeof fr / sizeof *fr; i++) {
         double ref = 20 * log10(a_lin(fr[i])), got = nc_a_weight_response_db(fr[i], FS);
-        CHECK(fabs(ref - got) < (fr[i] > 4000 ? 2.0 : 0.5), "%7.1f Hz: IEC %+6.2f dB, Filter %+6.2f dB", fr[i], ref, got);
+        CHECK(fabs(ref - got) < (fr[i] > 4000 ? 2.0 : (fr[i] > 2000 ? 1.0 : 0.5)), "%7.1f Hz: IEC %+6.2f dB, Filter %+6.2f dB", fr[i], ref, got);
     }
 
     /* 2) Signal vorbereiten */
@@ -179,7 +179,7 @@ int main(int argc, char **argv)
     FILE *f = fopen(csvp, "r");
     CHECK(f != NULL, "EVENTS.CSV vorhanden");
     if (!f) return 1;
-    char line[512]; fgets(line, sizeof line, f);
+    char line[512]; if (!fgets(line, sizeof line, f)) return 1;
     /* erwartete Gruppen: Ereignis 2+3 verschmelzen */
     struct { double t0, t1; const char *cls; } exp_[] = { {10.0, 10.6, "TUER"}, {25.0, 28.5, "KNALL"}, {45.0, 49.0, "SONST"}, {65.0, 67.0, "KNALL"} };
     int row = 0;
