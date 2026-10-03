@@ -19,7 +19,7 @@ SRCS := Src/main.c Src/diskio.c Src/stm32f4xx_it.c ../core/noise_core.c \
 ASMS := $(D)/cmsis_device/Source/Templates/gcc/startup_stm32f446xx.s
 
 CPU := -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
-INC := -IInc -I../core -I$(FF) -I$(HAL)/Inc -I$(D)/cmsis_device/Include -I$(D)/cmsis_core/Include
+INC := -IInc -I../core -I$(FF) -I$(HAL)/Inc -I$(D)/cmsis_device/Include -I$(D)/cmsis_core/CMSIS/Core/Include
 DEF := -DUSE_HAL_DRIVER -DSTM32F446xx -DHSE_VALUE=$(HSE_VALUE)
 CFLAGS := $(CPU) $(DEF) $(INC) -Os -g -std=gnu11 -Wall -ffunction-sections -fdata-sections
 LDFLAGS := $(CPU) -TSTM32F446RETx_FLASH.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=build/laermtracker.map -lm
