@@ -326,7 +326,8 @@ static void finish_event(nc_t *n)
     f = n->io.open(n->io.user, "/EVENTS.CSV", 'a');
     if (f) {
         char dur[16], lp[16], bgs[16];
-        fmt1(dur, sizeof dur, n->ev_last_active * 0.01f + 0.01f - n->ev_trig_frame * 0.01f);
+        uint32_t cs = n->ev_last_active + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
+        snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
         fmt1(lp, sizeof lp, lae);
         fmt1(bgs, sizeof bgs, n->ev_bg);
         if (fresh)
