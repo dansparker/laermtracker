@@ -50,6 +50,10 @@ typedef struct {
 #define NC_CHUNK_SAMPLES   1024
 #define NC_HIST_FRAMES     256
 
+#define NC_FQ_LEN          128
+
+typedef struct { float meansq; float peak; uint32_t pos; } nc_frame_t;
+
 typedef enum { NC_IDLE = 0, NC_ACTIVE = 1 } nc_state_t;
 
 typedef struct {
@@ -61,18 +65,24 @@ typedef struct {
     nc_config_t cfg;
     nc_io_t     io;
 
-    int16_t    *ring;               /* vom Aufrufer bereitgestellt */
+    /* --- ISR-Seite (nc_push24) --- */
+    int16_t    *ring;               /* vom Aufrufer bereitgestellt, 16 bit */
     uint32_t    ring_len;
+    uint32_t    M;                  /* Positionsmodul (Vielfaches von ring_len) */
     uint32_t    widx;               /* Schreibindex im Ring */
-    uint64_t    wr;                 /* Gesamtzahl geschriebener Samples */
-    uint64_t    rd;                 /* naechstes noch nicht gespeichertes Sample */
-    uint32_t    overruns;           /* verlorene Samples (SD zu langsam) */
-
+    volatile uint32_t wr;           /* Schreibposition [0,M) */
     nc_biquad_t aw[3];              /* A-Bewertung */
     uint32_t    frame_len;          /* Samples je 10-ms-Frame */
     uint32_t    frame_pos;
-    double      frame_sumA;         /* Summe (A-bewertet)^2 */
-    int32_t     frame_peak;
+    float       frame_sumA;         /* Summe (A-bewertet)^2 */
+    float       frame_peak;
+    nc_frame_t  fq[NC_FQ_LEN];      /* Frame-Warteschlange ISR -> Hauptschleife */
+    volatile uint32_t fq_head, fq_tail;
+    volatile uint32_t fq_dropped;
+
+    /* --- Hauptschleife (nc_poll) --- */
+    uint32_t    rd;                 /* naechste noch nicht gespeicherte Position */
+    uint32_t    overruns;           /* verlorene Samples (SD zu langsam) */
     float       ref_rms2;           /* Referenz-Effektivwert^2 fuer 94 dB */
     float       ref_peak;
 
@@ -114,7 +124,11 @@ typedef struct {
 
 void nc_default_config(nc_config_t *c);
 void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, uint32_t ring_len);
-/* 24-bit-Samples einspeisen; blockiert waehrend SD-Zugriffen */
+/* ISR-/DMA-Seite: 24-bit-Samples (int32, vorzeichenbehaftet) einspeisen. Kein Dateizugriff, kurz. */
+void nc_push24(nc_t *n, const int32_t *s24, uint32_t count);
+/* Hauptschleife: wartende Frames auswerten, Ereignisse erkennen und auf SD schreiben (darf blockieren) */
+void nc_poll(nc_t *n);
+/* Bequemlichkeit fuer Tests: push24 + poll */
 void nc_process(nc_t *n, const int32_t *s24, uint32_t count);
 /* laufendes Ereignis sauber abschliessen (z.B. vor Abschalten) */
 void nc_flush(nc_t *n);

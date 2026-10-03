@@ -36,7 +36,8 @@ static double a_lin(double f)
 /* ---- I/O ueber stdio ---- */
 static void path_of(char *o, size_t sz, const char *p) { snprintf(o, sz, "%s%s", g_out, p); }
 static int64_t t_base;
-static int64_t io_now(void *u) { (void)u; return t_base + (int64_t)(g_nc.wr * 1000ull / FS); }
+static uint64_t g_pushed;
+static int64_t io_now(void *u) { (void)u; return t_base + (int64_t)(g_pushed * 1000ull / FS); }
 static int io_mkdir(void *u, const char *p) { (void)u; char b[300]; path_of(b, sizeof b, p); MKDIR(b); return 0; }
 static void *io_open(void *u, const char *p, char m) { (void)u; char b[300]; path_of(b, sizeof b, p);
     return fopen(b, m == 'r' ? "rb" : (m == 'a' ? "ab" : "wb")); }
@@ -170,7 +171,8 @@ int main(int argc, char **argv)
             v = v > 8388607 ? 8388607 : (v < -8388608 ? -8388608 : v);
             blk[j] = (int32_t)lrint(v);
         }
-        nc_process(&g_nc, blk, (uint32_t)m);
+        nc_push24(&g_nc, blk, (uint32_t)m); g_pushed += m;
+        nc_poll(&g_nc);
     }
     nc_flush(&g_nc);
 

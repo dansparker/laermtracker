@@ -126,6 +126,7 @@ void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, ui
     memset(n, 0, sizeof *n);
     n->cfg = *c; n->io = *io; n->ring = ring; n->ring_len = ring_len;
     n->frame_len = c->fs / 100;
+    n->M = ring_len * (0xFFFFFFFFu / ring_len);
     double ref_pk = NC_FULLSCALE_24BIT * pow(10.0, NC_MIC_SENS_DBFS / 20.0);
     n->ref_peak = (float)ref_pk;
     n->ref_rms2 = (float)(ref_pk * ref_pk / 2.0);
@@ -137,24 +138,29 @@ void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, ui
 
 /* ----------------------------------------------------------- Ereignis-I/O */
 
+static uint32_t pdist(const nc_t *n, uint32_t a, uint32_t b) { return b >= a ? b - a : b + (n->M - a); }
+static uint32_t psub(const nc_t *n, uint32_t a, uint32_t d)  { return a >= d ? a - d : a + (n->M - d); }
+
 static void drain(nc_t *n, int all)
 {
     if (!n->wav) return;
-    if (n->wr - n->rd > n->ring_len) {                      /* Ring ueberlaufen: SD zu langsam */
-        uint64_t lost = n->wr - n->rd - n->ring_len;
-        n->rd += lost; n->overruns += (uint32_t)lost;
+    uint32_t wr = n->wr;                                    /* Schnappschuss (ISR schreibt weiter) */
+    if (pdist(n, n->rd, wr) > n->ring_len) {                /* Ring ueberlaufen: SD zu langsam */
+        uint32_t lost = pdist(n, n->rd, wr) - n->ring_len;
+        n->rd = (uint32_t)(((uint64_t)n->rd + lost) % n->M); n->overruns += lost;
     }
-    while (n->wr - n->rd >= (all ? 1u : NC_CHUNK_SAMPLES)) {
-        uint32_t avail = (uint32_t)(n->wr - n->rd);
+    for (;;) {
+        uint32_t avail = pdist(n, n->rd, wr);
+        if (avail < (all ? 1u : NC_CHUNK_SAMPLES)) break;
         uint32_t cnt = avail < NC_CHUNK_SAMPLES ? avail : NC_CHUNK_SAMPLES;
-        uint32_t ri = (uint32_t)(n->rd % n->ring_len);
+        uint32_t ri = n->rd % n->ring_len;
         for (uint32_t i = 0; i < cnt; i++) {
             n->chunk[i] = n->ring[ri];
             if (++ri == n->ring_len) ri = 0;
         }
         n->io.write(n->io.user, n->wav, n->chunk, cnt * 2);
         n->wav_data_bytes += cnt * 2;
-        n->rd += cnt;
+        n->rd = (uint32_t)(((uint64_t)n->rd + cnt) % n->M);
     }
 }
 
@@ -369,7 +375,7 @@ static void event_account(nc_t *n, float L, float laf, float lpk, double meansq,
     if (L - n->prev_db > n->ev_rise) n->ev_rise = L - n->prev_db;
 }
 
-static void start_event(nc_t *n, float L, float laf, float lpk, double meansq)
+static void start_event(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
 {
     uint32_t ring_frames = n->ring_len / n->frame_len;
     uint32_t pre = n->cfg.pre_ms / 10;
@@ -379,9 +385,9 @@ static void start_event(nc_t *n, float L, float laf, float lpk, double meansq)
     if (pre > pre_max) pre = pre_max;
     pre = pre / 10 * 10;
     n->ev_pre_frames = pre;
-    n->rd = n->wr - (uint64_t)n->frame_len * (pre + 1);
-    int64_t now = n->io.now_ms(n->io.user);
-    n->ev_start_ms = now - (int64_t)n->frame_len * (pre + 1) * 1000 / n->cfg.fs;
+    n->rd = psub(n, endpos, n->frame_len * (pre + 1));
+    int64_t now = n->io.now_ms(n->io.user);                /* entspricht der Schreibposition n->wr */
+    n->ev_start_ms = now - (int64_t)pdist(n, n->rd, n->wr) * 1000 / n->cfg.fs;
     int y, mo, d, h, mi, s, ms;
     nc_civil_from_ms(n->ev_start_ms, &y, &mo, &d, &h, &mi, &s, &ms);
     snprintf(n->dir, sizeof n->dir, "%02d%02d%02d", y % 100, mo, d);
@@ -407,15 +413,14 @@ static void start_event(nc_t *n, float L, float laf, float lpk, double meansq)
     event_account(n, L, laf, lpk, meansq, pre);
 }
 
-static void end_frame(nc_t *n)
+static void frame_consume(nc_t *n, const nc_frame_t *fr)
 {
-    double meansq = n->frame_sumA / n->frame_len;
+    double meansq = fr->meansq;
     if (meansq < 1e-3) meansq = 1e-3;
     float cal = NC_REF_SPL_DB + n->cfg.cal_offset_db;
     float L = 10.0f * log10f((float)meansq / n->ref_rms2) + cal;
-    float pk = n->frame_peak < 1 ? 1.0f : (float)n->frame_peak;
+    float pk = fr->peak < 1 ? 1.0f : fr->peak;
     float lpk = 20.0f * log10f(pk / n->ref_peak) + cal;
-    n->frame_sumA = 0; n->frame_peak = 0; n->frame_pos = 0;
 
     const float alpha = 1.0f - expf(-0.010f / 0.125f);     /* Fast: tau = 125 ms */
     if (n->frames_seen == 0) n->laf_energy = (float)meansq;
@@ -434,7 +439,7 @@ static void end_frame(nc_t *n)
         } else if (n->holdoff) {
             n->holdoff--;
         } else if (L >= thr) {
-            start_event(n, L, laf, lpk, meansq);
+            start_event(n, L, laf, lpk, meansq, fr->pos);
         } else if (L < n->bg_db) {
             n->bg_db += (L - n->bg_db) * 0.05f;
         } else if (L < n->bg_db + 6.0f) {
@@ -451,19 +456,43 @@ static void end_frame(nc_t *n)
     n->prev_db = L;
 }
 
-void nc_process(nc_t *n, const int32_t *s, uint32_t count)
+void nc_push24(nc_t *n, const int32_t *s, uint32_t count)
 {
     for (uint32_t i = 0; i < count; i++) {
         int32_t x = s[i];
         n->ring[n->widx] = (int16_t)(x >> 8);
         if (++n->widx == n->ring_len) n->widx = 0;
-        n->wr++;
+        uint32_t w = n->wr + 1; if (w == n->M) w = 0; n->wr = w;
         float y = aw_run(n->aw, (float)x);
-        n->frame_sumA += (double)(y * y);
-        int32_t ax = x < 0 ? -x : x;
+        n->frame_sumA += y * y;
+        float ax = x < 0 ? (float)-x : (float)x;
         if (ax > n->frame_peak) n->frame_peak = ax;
-        if (++n->frame_pos == n->frame_len) end_frame(n);
+        if (++n->frame_pos == n->frame_len) {
+            uint32_t h = n->fq_head;
+            if (h - n->fq_tail >= NC_FQ_LEN) n->fq_dropped++;
+            else {
+                nc_frame_t *f = &n->fq[h % NC_FQ_LEN];
+                f->meansq = n->frame_sumA / (float)n->frame_len; f->peak = n->frame_peak; f->pos = w;
+                n->fq_head = h + 1;
+            }
+            n->frame_sumA = 0; n->frame_peak = 0; n->frame_pos = 0;
+        }
     }
+}
+
+void nc_poll(nc_t *n)
+{
+    while (n->fq_tail != n->fq_head) {
+        nc_frame_t f = n->fq[n->fq_tail % NC_FQ_LEN];
+        n->fq_tail++;
+        frame_consume(n, &f);
+    }
+}
+
+void nc_process(nc_t *n, const int32_t *s, uint32_t count)
+{
+    nc_push24(n, s, count);
+    nc_poll(n);
 }
 
 void nc_flush(nc_t *n)
