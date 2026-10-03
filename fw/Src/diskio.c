@@ -1,4 +1,5 @@
 /* FatFs-Anbindung an HAL_SD (Polling, 4-Bit-SDIO). Die Karte wird in main() initialisiert. */
+#include "ff.h"
 #include "diskio.h"
 #include "stm32f4xx_hal.h"
 
