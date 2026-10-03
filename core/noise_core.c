@@ -28,6 +28,15 @@ void nc_civil_from_ms(int64_t ms, int *y, int *mo, int *d, int *h, int *mi, int 
     *msec = (int)rem;
 }
 
+int64_t nc_ms_from_civil(int y, int mo, int d, int h, int mi, int s, int msec)
+{
+    y -= mo <= 2;
+    int64_t era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+    int64_t doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1, doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    int64_t days = era * 146097 + doe - 719468;
+    return ((days * 86400 + h * 3600 + mi * 60 + s) * 1000) + msec;
+}
+
 static void fmt1(char *out, size_t sz, float v)         /* "-12.3" ohne Float-printf */
 {
     int t = (int)lroundf(v * 10.0f);

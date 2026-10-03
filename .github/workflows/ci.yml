@@ -15,3 +15,17 @@ jobs:
         with:
           name: test-ausgabe
           path: out/
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-arm-none-eabi libnewlib-arm-none-eabi
+      - name: Abhaengigkeiten holen (HAL, CMSIS, FatFs)
+        run: sh fw/fetch_deps.sh
+      - name: Firmware bauen
+        run: make -C fw
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: fw/build/laermtracker.bin

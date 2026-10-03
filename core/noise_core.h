@@ -135,6 +135,7 @@ void nc_flush(nc_t *n);
 
 /* Hilfen (auch fuer Tests) */
 float nc_a_weight_response_db(float f, float fs);   /* Betrag des digitalen Filters inkl. Normierung */
+int64_t nc_ms_from_civil(int y, int mo, int d, int h, int mi, int s, int msec);
 void  nc_civil_from_ms(int64_t ms, int *y, int *mo, int *d, int *h, int *mi, int *s, int *msec);
 
 #ifdef __cplusplus
