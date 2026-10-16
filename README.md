@@ -8,7 +8,7 @@ Lärmereignisse (Türen auf/zu, Türknallen) in der Wohnung erkennen und mit
 ## Status
 | Teil | Stand |
 |---|---|
-| Kern `core/` (Pegel, Erkennung, WAV/SVG/CSV) | per CI getestet gegen unabhängige Referenzberechnung (`tests/`) |
+| Kern `core/` (Pegel, Erkennung, WAV/SVG/CSV) | per CI getestet: Referenzpegel (`tests/test_core.c`), Grenzfälle (`tests/test_edge.c`: Fehlausl., bit-genaue Audiodaten, Stillstand/Überlauf, Mitternacht, SD-Fehler, 310 Ereignisse/Tag), AddressSanitizer/UBSan, `-Werror` |
 | Firmware `fw/` | baut in der CI (54 kB Flash, 119 kB von 128 kB RAM inkl. Stack); **noch nicht auf Hardware ausprobiert** |
 
 Die Hardware-Schicht (I2S-DMA-Format, SDIO, RTC) ist nach Datenblatt/HAL geschrieben, aber
