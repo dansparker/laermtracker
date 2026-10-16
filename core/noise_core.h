@@ -132,6 +132,7 @@ typedef struct {
     float       ev_limit;           /* Grenzwert des laufenden Ereignisses */
     uint8_t     ev_dist, ev_night;  /* Stoerung? / Nachtzeit? */
     nc_dayev_t  day[NC_DAY_MAX];    /* Arbeitsspeicher fuer das Tagesdiagramm */
+    uint32_t    day_n;
 
     int16_t     chunk[NC_CHUNK_SAMPLES];
 } nc_t;
