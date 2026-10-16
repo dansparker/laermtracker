@@ -34,16 +34,22 @@ typedef struct {
     uint32_t max_event_ms;     /* harte Obergrenze je Ereignis                     */
     float    slam_lafmax_dba;  /* LAFmax >= Wert  => Klasse KNALL                  */
     float    impulse_rise_db;  /* Anstieg >= Wert in 10 ms => impulshaft (TUER)    */
+    /* Stoerungskriterium: LAFmax >= zeitabhaengiger Grenzwert (Innenraum, am Mikrofon) */
+    uint8_t  night_start_h;    /* Nachtzeit ab (Stunde, lokal)                     */
+    uint8_t  night_end_h;      /* Nachtzeit bis                                    */
+    float    lim_night_dba;    /* Grenzwert nachts (WHO 2009: 42 dB LAmax innen)   */
+    float    lim_day_dba;      /* Grenzwert tags (eigene Annahme, anpassbar)       */
 } nc_config_t;
 
 typedef struct {
     void   *user;
     int64_t (*now_ms)(void *user);                       /* Unix-Zeit in ms (lokal/UTC egal) */
     int     (*mkdir)(void *user, const char *path);      /* 0 = ok oder existiert schon      */
-    void   *(*open)(void *user, const char *path, char mode); /* mode 'w' neu, 'a' anhaengen */
+    void   *(*open)(void *user, const char *path, char mode); /* mode 'w' neu, 'a' anhaengen, 'r' lesen */
     int     (*write)(void *user, void *h, const void *buf, uint32_t n); /* 0 = ok            */
     int     (*seek)(void *user, void *h, uint32_t pos);
     int     (*close)(void *user, void *h);
+    int32_t (*read)(void *user, void *h, void *buf, uint32_t n);  /* gelesene Bytes, 0 = Ende, <0 Fehler */
 } nc_io_t;
 
 #define NC_MAX_PLOT_BINS   720          /* 100-ms-Bins => 72 s */
@@ -53,6 +59,11 @@ typedef struct {
 #define NC_FQ_LEN          128
 
 typedef struct { float meansq; float peak; uint32_t pos; } nc_frame_t;
+
+#define NC_DAY_MAX 300
+
+/* Ereignis im Tagesdiagramm */
+typedef struct { uint32_t sod; int16_t lafmax10, bg10; uint8_t cls, dist; } nc_dayev_t;
 
 typedef enum { NC_IDLE = 0, NC_ACTIVE = 1 } nc_state_t;
 
@@ -118,6 +129,9 @@ typedef struct {
     uint32_t    wav_data_bytes;
     uint32_t    events_total;
     uint32_t    holdoff;            /* Frames Pause nach SD-Fehler */
+    float       ev_limit;           /* Grenzwert des laufenden Ereignisses */
+    uint8_t     ev_dist, ev_night;  /* Stoerung? / Nachtzeit? */
+    nc_dayev_t  day[NC_DAY_MAX];    /* Arbeitsspeicher fuer das Tagesdiagramm */
 
     int16_t     chunk[NC_CHUNK_SAMPLES];
 } nc_t;

@@ -128,6 +128,10 @@ void nc_default_config(nc_config_t *c)
     c->max_event_ms = 60000;
     c->slam_lafmax_dba = 75.0f;
     c->impulse_rise_db = 10.0f;
+    c->night_start_h = 22;
+    c->night_end_h = 6;
+    c->lim_night_dba = 42.0f;
+    c->lim_day_dba = 55.0f;
 }
 
 void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, uint32_t ring_len)
@@ -229,10 +233,12 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
         if (v < vmin) vmin = v;
         if (v > vmax) vmax = v;
     }
+    float lim = n->ev_limit;
+    if (lim < vmax + 30 && lim > vmin - 30) { if (lim < vmin) vmin = lim; if (lim > vmax) vmax = lim; }
     int ymin = (int)floorf(vmin / 10.0f) * 10, ymax = (int)ceilf((vmax + 1.0f) / 10.0f) * 10;
     if (ymin < 0) ymin = 0;
     if (ymax - ymin < 30) ymax = ymin + 30;
-    const int X0 = 70, Y0 = 70, PW = 800, PH = 320;
+    const int X0 = 70, Y0 = 84, PW = 800, PH = 320;
     float T = n->plot_n * 0.1f;
     if (T < 1.0f) T = 1.0f;
     char a[16], b2[16], c[16], e[16], g[16];
@@ -240,10 +246,13 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
     fmt1(e, sizeof e, lae); fmt1(g, sizeof g, n->ev_bg);
 
     io_printf(n, f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" "
-              "width=\"900\" height=\"450\" viewBox=\"0 0 900 450\" font-family=\"sans-serif\" font-size=\"12\">\n"
-              "<rect width=\"900\" height=\"450\" fill=\"#fff\"/>\n");
-    io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\">Lärmereignis %s – %04d-%02d-%02d %02d:%02d:%02d</text>\n",
-              X0, cls, y, mo, d, h, mi, s);
+              "width=\"900\" height=\"460\" viewBox=\"0 0 900 460\" font-family=\"sans-serif\" font-size=\"12\">\n"
+              "<rect width=\"900\" height=\"460\" fill=\"#fff\"/>\n");
+    io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\" fill=\"%s\">%sLärmereignis %s – %04d-%02d-%02d %02d:%02d:%02d</text>\n",
+              X0, n->ev_dist ? "#c00" : "#000", n->ev_dist ? "STÖRUNG – " : "", cls, y, mo, d, h, mi, s);
+    { char lm[16], ov[16]; fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
+      io_printf(n, f, "<text x=\"%d\" y=\"64\" fill=\"%s\">Grenzwert %s: LAFmax ≥ %s dB(A) – Messwert %s dB(A), %s dB %s Grenzwert</text>\n",
+                X0, n->ev_dist ? "#c00" : "#2a7a2a", n->ev_night ? "nachts" : "tagsüber", lm, b2, ov, n->ev_dist ? "über" : "unter"); }
     io_printf(n, f, "<text x=\"%d\" y=\"46\">LAeq = %s dB(A) · LAFmax = %s dB(A) · Lpeak = %s dB (unbewertet) · "
               "LAE = %s dB(A) · Hintergrund = %s dB(A)</text>\n", X0, a, b2, c, e, g);
     for (int v = ymin; v <= ymax; v += 10) {
@@ -268,6 +277,11 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
     int yl = Y0 + PH - (int)(PH * (vl - ymin) / (ymax - ymin));
     io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#d55\" stroke-dasharray=\"6 3\"/>"
               "<text x=\"%d\" y=\"%d\" text-anchor=\"end\" fill=\"#d55\">LAeq %s</text>\n", X0, yl, X0 + PW, yl, X0 + PW - 4, yl - 4, a);
+    if (lim >= ymin && lim <= ymax) {
+        int yg = Y0 + PH - (int)(PH * (lim - ymin) / (ymax - ymin));
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e08a00\" stroke-width=\"2\" stroke-dasharray=\"2 4\"/>"
+                  "<text x=\"%d\" y=\"%d\" fill=\"#e08a00\">Grenzwert</text>\n", X0, yg, X0 + PW, yg, X0 + 4, yg - 4);
+    }
     /* Kurve */
     io_printf(n, f, "<polyline fill=\"none\" stroke=\"#1769aa\" stroke-width=\"1.5\" points=\"");
     for (uint32_t i = 0; i < n->plot_n; i++) {
@@ -282,6 +296,133 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
               xm, ym, xm + 8, ym + 4, b2);
     io_printf(n, f, "</svg>\n");
     n->io.close(n->io.user, f);
+}
+
+
+/* ------------------------------------------------- CSV + Tagesdiagramm */
+
+#define CSV_HEAD "datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe\n"
+
+static void csv_append(nc_t *n, const char *path, const char *row)
+{
+    void *f = n->io.open(n->io.user, path, 'r');            /* Existenz pruefen */
+    int fresh = (f == NULL);
+    if (f) n->io.close(n->io.user, f);
+    f = n->io.open(n->io.user, path, 'a');
+    if (!f) return;
+    if (fresh) n->io.write(n->io.user, f, CSV_HEAD, sizeof CSV_HEAD - 1);
+    n->io.write(n->io.user, f, row, (uint32_t)strlen(row));
+    n->io.close(n->io.user, f);
+}
+
+static int parse10(const char *p)                           /* "-12.3" -> -123 */
+{
+    int neg = 0, v = 0;
+    if (*p == '-') { neg = 1; p++; }
+    while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+    v *= 10;
+    if (*p == '.' && p[1] >= '0' && p[1] <= '9') v += p[1] - '0';
+    return neg ? -v : v;
+}
+
+static void day_parse_line(nc_t *n, char *line)
+{
+    char *fld[16]; int nf = 0;
+    fld[nf++] = line;
+    for (char *p = line; *p && nf < 16; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
+    if (nf < 13 || line[0] < '0' || line[0] > '9' || n->day_n >= NC_DAY_MAX || strlen(fld[1]) < 8) return;
+    nc_dayev_t *e = &n->day[n->day_n++];
+    const char *t = fld[1];
+    e->sod = (uint32_t)(((t[0] - '0') * 10 + (t[1] - '0')) * 3600 + ((t[3] - '0') * 10 + (t[4] - '0')) * 60 + (t[6] - '0') * 10 + (t[7] - '0'));
+    e->cls = fld[3][0] == 'T' ? 0 : (fld[3][0] == 'K' ? 1 : 2);   /* TUER, KNALL, SONST */
+    e->lafmax10 = (int16_t)parse10(fld[6]);
+    e->bg10 = (int16_t)parse10(fld[9]);
+    e->dist = fld[12][0] == '1';
+}
+
+static void write_day_svg(nc_t *n)
+{
+    char path[32];
+    snprintf(path, sizeof path, "/%s/TAG.CSV", n->dir);
+    void *f = n->io.open(n->io.user, path, 'r');
+    if (!f) return;
+    n->day_n = 0;
+    char line[200]; uint32_t ll = 0; int32_t got;
+    while ((got = n->io.read(n->io.user, f, n->chunk, sizeof n->chunk)) > 0) {
+        const char *b = (const char *)n->chunk;
+        for (int32_t i = 0; i < got; i++) {
+            if (b[i] == '\n' || b[i] == '\r') { if (ll) { line[ll] = 0; day_parse_line(n, line); ll = 0; } }
+            else if (ll < sizeof line - 1) line[ll++] = b[i];
+        }
+    }
+    n->io.close(n->io.user, f);
+
+    const int ns = n->cfg.night_start_h, ne = n->cfg.night_end_h;
+    float ln = n->cfg.lim_night_dba, ld = n->cfg.lim_day_dba;
+    float lo = ln < ld ? ln : ld, hi = ln > ld ? ln : ld;
+    uint32_t ndn = 0, ndd = 0;
+    for (uint32_t i = 0; i < n->day_n; i++) {
+        const nc_dayev_t *e = &n->day[i];
+        float bg = e->bg10 / 10.0f, v = e->lafmax10 / 10.0f;
+        if (bg < lo) lo = bg;
+        if (v > hi) hi = v;
+        uint32_t hr = e->sod / 3600;
+        int night = ns > ne ? (hr >= (uint32_t)ns || hr < (uint32_t)ne) : (hr >= (uint32_t)ns && hr < (uint32_t)ne);
+        if (e->dist) { if (night) ndn++; else ndd++; }
+    }
+    int ymin = (int)floorf((lo - 5.0f) / 10.0f) * 10, ymax = (int)ceilf((hi + 2.0f) / 10.0f) * 10;
+    if (ymin < 0) ymin = 0;
+    if (ymax - ymin < 30) ymax = ymin + 30;
+    const int X0 = 70, Y0 = 84, PW = 900, PH = 300;
+    #define DX(sec) (X0 + (int)((float)PW * (float)(sec) / 86400.0f))
+    #define DY(v)   (Y0 + PH - (int)((float)PH * ((v) - (float)ymin) / (float)(ymax - ymin)))
+    int nseg[2][2], dseg[2][2], nn = 0, nd = 0;
+    if (ns > ne) { nseg[nn][0] = 0; nseg[nn++][1] = ne; nseg[nn][0] = ns; nseg[nn++][1] = 24; dseg[nd][0] = ne; dseg[nd++][1] = ns; }
+    else         { nseg[nn][0] = ns; nseg[nn++][1] = ne; dseg[nd][0] = 0; dseg[nd++][1] = ns; dseg[nd][0] = ne; dseg[nd++][1] = 24; }
+
+    snprintf(path, sizeof path, "/%s/TAG.SVG", n->dir);
+    f = n->io.open(n->io.user, path, 'w');
+    if (!f) return;
+    char lns[16], lds[16];
+    fmt1(lns, sizeof lns, ln); fmt1(lds, sizeof lds, ld);
+    io_printf(n, f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1000\" height=\"470\" "
+              "viewBox=\"0 0 1000 470\" font-family=\"sans-serif\" font-size=\"12\">\n<rect width=\"1000\" height=\"470\" fill=\"#fff\"/>\n");
+    io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\">Tagesverlauf 20%.2s-%.2s-%.2s – %lu Ereignisse, "
+              "<tspan fill=\"#c00\">%lu Störungen</tspan> (nachts %lu, tagsüber %lu)</text>\n", X0, n->dir, n->dir + 2, n->dir + 4,
+              (unsigned long)n->day_n, (unsigned long)(ndn + ndd), (unsigned long)ndn, (unsigned long)ndd);
+    io_printf(n, f, "<text x=\"%d\" y=\"46\">Markerhöhe = LAFmax, Fuß = Hintergrundpegel · rot = Störung (LAFmax ≥ Grenzwert: nachts %s, tagsüber %s dB(A)) "
+              "· ● Tür ■ Knall ◆ Sonstiges%s</text>\n", X0, lns, lds, n->day_n >= NC_DAY_MAX ? " · nur die ersten Ereignisse dargestellt" : "");
+    for (int i = 0; i < nn; i++)
+        io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#e6ebf4\"/>\n", DX(nseg[i][0] * 3600), Y0,
+                  DX(nseg[i][1] * 3600) - DX(nseg[i][0] * 3600), PH);
+    for (int v = ymin; v <= ymax; v += 10)
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ddd\"/><text x=\"%d\" y=\"%d\" text-anchor=\"end\">%d</text>\n",
+                  X0, DY((float)v), X0 + PW, DY((float)v), X0 - 6, DY((float)v) + 4, v);
+    for (int hr = 0; hr <= 24; hr += 2)
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#eee\"/><text x=\"%d\" y=\"%d\" text-anchor=\"middle\">%02d:00</text>\n",
+                  DX(hr * 3600), Y0, DX(hr * 3600), Y0 + PH, DX(hr * 3600), Y0 + PH + 16, hr);
+    io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"none\" stroke=\"#444\"/>\n", X0, Y0, PW, PH);
+    io_printf(n, f, "<text x=\"%d\" y=\"%d\" text-anchor=\"middle\">Uhrzeit (lokal) – blau hinterlegt: Nachtzeit</text>\n", X0 + PW / 2, Y0 + PH + 38);
+    io_printf(n, f, "<text transform=\"translate(18,%d) rotate(-90)\" text-anchor=\"middle\">LAFmax der Ereignisse [dB(A) SPL]</text>\n", Y0 + PH / 2);
+    for (int i = 0; i < nn; i++)                                   /* Grenzwert Nacht */
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e08a00\" stroke-width=\"2\" stroke-dasharray=\"2 4\"/>\n",
+                  DX(nseg[i][0] * 3600), DY(ln), DX(nseg[i][1] * 3600), DY(ln));
+    for (int i = 0; i < nd; i++)                                   /* Grenzwert Tag */
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#e08a00\" stroke-width=\"2\" stroke-dasharray=\"2 4\"/>\n",
+                  DX(dseg[i][0] * 3600), DY(ld), DX(dseg[i][1] * 3600), DY(ld));
+    for (uint32_t i = 0; i < n->day_n; i++) {
+        const nc_dayev_t *e = &n->day[i];
+        int cx = DX(e->sod), yb = DY(e->bg10 / 10.0f), yv = DY(e->lafmax10 / 10.0f);
+        const char *col = e->dist ? "#d32f2f" : "#1769aa";
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-opacity=\"0.35\" stroke-width=\"2\"/>\n", cx, yb, cx, yv, col);
+        if (e->cls == 0)      io_printf(n, f, "<circle cx=\"%d\" cy=\"%d\" r=\"4.5\" fill=\"%s\"/>\n", cx, yv, col);
+        else if (e->cls == 1) io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"9\" height=\"9\" fill=\"%s\"/>\n", cx - 4, yv - 4, col);
+        else                  io_printf(n, f, "<polygon points=\"%d,%d %d,%d %d,%d %d,%d\" fill=\"%s\"/>\n", cx, yv - 6, cx + 5, yv, cx, yv + 6, cx - 5, yv, col);
+    }
+    io_printf(n, f, "</svg>\n");
+    n->io.close(n->io.user, f);
+    #undef DX
+    #undef DY
 }
 
 static void finish_event(nc_t *n)
@@ -329,28 +470,30 @@ static void finish_event(nc_t *n)
 
     if (n->bin_cnt) { if (n->plot_n < NC_MAX_PLOT_BINS) n->plot[n->plot_n++] = n->bin_max; n->bin_cnt = 0; }
 
-    int y, mo, d, h, mi, s, ms;
-    nc_civil_from_ms(n->ev_start_ms, &y, &mo, &d, &h, &mi, &s, &ms);
+    int ty, tmo, td, th, tmi, ts, tms;                    /* Ausloesezeit */
+    nc_civil_from_ms(tm[0], &ty, &tmo, &td, &th, &tmi, &ts, &tms);
+    const int ns = n->cfg.night_start_h, ne = n->cfg.night_end_h;
+    int night = ns > ne ? (th >= ns || th < ne) : (th >= ns && th < ne);
+    float lim = night ? n->cfg.lim_night_dba : n->cfg.lim_day_dba;
+    int dist = n->ev_lafmax >= lim;
+    n->ev_limit = lim; n->ev_dist = (uint8_t)dist; n->ev_night = (uint8_t)night;
+
     char path[32];
     snprintf(path, sizeof path, "/%s/%s.SVG", n->dir, n->base);
-    write_svg(n, path, cls, laeq, lae, y, mo, d, h, mi, s);
+    write_svg(n, path, cls, laeq, lae, ty, tmo, td, th, tmi, ts);
 
-    void *f = n->io.open(n->io.user, "/EVENTS.CSV", 'r');   /* Existenz pruefen */
-    int fresh = (f == NULL);
-    if (f) n->io.close(n->io.user, f);
-    f = n->io.open(n->io.user, "/EVENTS.CSV", 'a');
-    if (f) {
-        char dur[16], lp[16], bgs[16];
-        uint32_t cs = n->ev_last_active + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
-        snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
-        fmt1(lp, sizeof lp, lae);
-        fmt1(bgs, sizeof bgs, n->ev_bg);
-        if (fresh)
-            io_printf(n, f, "datum;zeit;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;datei;ueberlaeufe\n");
-        io_printf(n, f, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;/%s/%s.WAV;%lu\n",
-                  y, mo, d, h, mi, s, ms, cls, dur, a, bb, c, lp, bgs, n->dir, n->base, (unsigned long)n->overruns);
-        n->io.close(n->io.user, f);
-    }
+    char dur[16], lp[16], bgs[16], lm[16], ov[16], row[256];
+    uint32_t cs = n->ev_last_active + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
+    snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
+    fmt1(lp, sizeof lp, lae); fmt1(bgs, sizeof bgs, n->ev_bg);
+    fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
+    snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu\n",
+             ty, tmo, td, th, tmi, ts, tms, night ? "NACHT" : "TAG", cls, dur, a, bb, c, lp, bgs, lm, ov, dist,
+             n->dir, n->base, (unsigned long)n->overruns);
+    csv_append(n, "/EVENTS.CSV", row);
+    snprintf(path, sizeof path, "/%s/TAG.CSV", n->dir);
+    csv_append(n, path, row);
+    write_day_svg(n);
     n->events_total++;
     n->state = NC_IDLE;
 }

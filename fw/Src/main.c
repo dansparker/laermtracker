@@ -177,6 +177,7 @@ static void *io_open(void *u, const char *p, char mode)
 }
 static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; UINT w; return (f_write((FIL *)h, b, n, &w) == FR_OK && w == n) ? 0 : -1; }
 static int io_seek(void *u, void *h, uint32_t pos) { (void)u; return f_lseek((FIL *)h, pos) == FR_OK ? 0 : -1; }
+static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; UINT r; return f_read((FIL *)h, b, n, &r) == FR_OK ? (int32_t)r : -1; }
 static int io_close(void *u, void *h) { (void)u; file_used[(FIL *)h - files] = 0; return f_close((FIL *)h) == FR_OK ? 0 : -1; }
 
 /* ------------------------------------------------------------------ Audio (DMA-Callbacks) */
@@ -219,7 +220,9 @@ int main(void)
     nc_config_t cfg; nc_default_config(&cfg);
     cfg.fs = SAMPLE_RATE_HZ; cfg.cal_offset_db = CAL_OFFSET_DB; cfg.trig_delta_db = TRIG_DELTA_DB;
     cfg.trig_min_dba = TRIG_MIN_DBA; cfg.pre_ms = PRE_MS; cfg.post_ms = POST_MS; cfg.slam_lafmax_dba = SLAM_LAFMAX_DBA;
-    nc_io_t io = { NULL, rtc_now_ms, io_mkdir, io_open, io_write, io_seek, io_close };
+    cfg.night_start_h = NIGHT_START_H; cfg.night_end_h = NIGHT_END_H;
+    cfg.lim_night_dba = LIM_NIGHT_DBA; cfg.lim_day_dba = LIM_DAY_DBA;
+    nc_io_t io = { NULL, rtc_now_ms, io_mkdir, io_open, io_write, io_seek, io_close, io_read };
     nc_init(&nc, &cfg, &io, ring, RING_SAMPLES);
 
     hi2s2.Instance = SPI2;

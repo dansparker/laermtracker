@@ -16,4 +16,10 @@
 #define POST_MS            3000u
 #define SLAM_LAFMAX_DBA    75.0f
 
+/* Stoerungskriterium: LAFmax >= Grenzwert (Innenraum am Mikrofon), Zeiten lokal */
+#define NIGHT_START_H      22
+#define NIGHT_END_H        6
+#define LIM_NIGHT_DBA      42.0f    /* WHO Night Noise Guidelines 2009: 42 dB LAmax innen (Aufwachreaktionen) */
+#define LIM_DAY_DBA        55.0f    /* eigene Annahme, kein Normwert - an Wohnsituation anpassen */
+
 #endif

@@ -44,6 +44,7 @@ static void *io_open(void *u, const char *p, char m) { (void)u; char b[300]; pat
 static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; return fwrite(b, 1, n, (FILE *)h) == n ? 0 : -1; }
 static int io_seek(void *u, void *h, uint32_t p) { (void)u; return fseek((FILE *)h, (long)p, SEEK_SET); }
 static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
+static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
 
 static int64_t days_from_civil(int y, int m, int d)
 {
@@ -159,10 +160,10 @@ int main(int argc, char **argv)
 
     /* 3) Kern laufen lassen */
     nc_config_t cfg; nc_default_config(&cfg);
-    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close };
+    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read };
     static int16_t ring[48000];
     nc_init(&g_nc, &cfg, &io, ring, 48000);
-    t_base = (days_from_civil(2026, 10, 3) * 86400 + 14 * 3600 + 30 * 60) * 1000;
+    t_base = (days_from_civil(2026, 10, 3) * 86400 + 21 * 3600 + 59 * 60 + 30) * 1000;   /* 21:59:30 -> Nachtgrenze 22:00 wird ueberschritten */
     static int32_t blk[512];
     for (size_t i = 0; i < N; i += 512) {
         size_t m = N - i < 512 ? N - i : 512;
@@ -183,17 +184,25 @@ int main(int argc, char **argv)
     if (!f) return 1;
     char line[512]; if (!fgets(line, sizeof line, f)) return 1;
     /* erwartete Gruppen: Ereignis 2+3 verschmelzen */
-    struct { double t0, t1; const char *cls; } exp_[] = { {10.0, 10.6, "TUER"}, {25.0, 28.5, "KNALL"}, {45.0, 49.0, "SONST"}, {65.0, 67.0, "KNALL"} };
+    struct { double t0, t1; const char *cls, *zr; int dist; } exp_[] = { {10.0, 10.6, "TUER", "TAG", 0}, {25.0, 28.5, "KNALL", "TAG", 1},
+                                                                    {45.0, 49.0, "SONST", "NACHT", 1}, {65.0, 67.0, "KNALL", "NACHT", 1} };
     int row = 0;
     while (fgets(line, sizeof line, f)) {
-        char d[16], tm[16], cls[8], file[64]; double act, laeq, lafmax, lpk, lae, bg; int ovr = 0;
-        for (char *p = line; *p; p++) if (*p == ';') *p = ' ';
-        if (sscanf(line, "%15s %15s %7s %lf %lf %lf %lf %lf %lf %63s %d", d, tm, cls, &act, &laeq, &lafmax, &lpk, &lae, &bg, file, &ovr) < 10) continue;
+        char *fld[16]; int nf = 0; fld[nf++] = line;
+        for (char *p = line; *p; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
+        if (nf < 15 || line[0] != '2') continue;
+        const char *tm = fld[1], *zr = fld[2], *cls = fld[3];
+        double act = atof(fld[4]), laeq = atof(fld[5]), lafmax = atof(fld[6]), lpk = atof(fld[7]), lae = atof(fld[8]), bg = atof(fld[9]);
+        double lim = atof(fld[10]), ueber = atof(fld[11]); int dist = atoi(fld[12]);
         int hh, mm, ss, ms; sscanf(tm, "%d:%d:%d.%d", &hh, &mm, &ss, &ms);
-        double fstart = hh * 3600 + mm * 60 + ss + ms / 1000.0 - (14 * 3600 + 30 * 60);
-        printf("Zeile %d: %s %s %s aktiv %.2fs LAeq %.1f LAFmax %.1f Lpeak %.1f LAE %.1f bg %.1f\n", row, d, tm, cls, act, laeq, lafmax, lpk, lae, bg);
+        double ta = hh * 3600 + mm * 60 + ss + ms / 1000.0 - (21 * 3600 + 59 * 60 + 30);   /* Ausloesezeit */
+        printf("Zeile %d: %s %s %s %s aktiv %.2fs LAeq %.1f LAFmax %.1f Lpeak %.1f LAE %.1f bg %.1f Grenzwert %.1f (%+.1f) Stoerung %d\n",
+               row, fld[0], tm, zr, cls, act, laeq, lafmax, lpk, lae, bg, lim, ueber, dist);
         if (row >= 4) { row++; continue; }
-        double ta = fstart + 1.0, tb = ta + act;               /* Ausloesung = Dateianfang + 1 s Vorlauf */
+        double tb = ta + act;
+        CHECK(!strcmp(zr, exp_[row].zr), "Zeitraum %s (erwartet %s)", zr, exp_[row].zr);
+        CHECK(dist == exp_[row].dist && fabs(ueber - (lafmax - lim)) < 0.11 && fabs(lim - (!strcmp(zr, "NACHT") ? 42.0 : 55.0)) < 0.01,
+              "Stoerung=%d (erwartet %d), Grenzwert %.1f, Ueberschreitung %+.1f dB", dist, exp_[row].dist, lim, ueber);
         CHECK(!strcmp(cls, exp_[row].cls), "Klasse %s (erwartet %s)", cls, exp_[row].cls);
         CHECK(ta > exp_[row].t0 - 0.3 && ta < exp_[row].t1, "Beginn %.2f s im Fenster [%.1f, %.1f]", ta, exp_[row].t0 - 0.3, exp_[row].t1);
         double wa = exp_[row].t0 - 0.2, wb = exp_[row].t1 + 4.0;
