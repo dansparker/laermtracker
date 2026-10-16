@@ -39,10 +39,10 @@ static int16_t g_ring[RING];
 /* ---- I/O ---- */
 static int64_t io_now(void *u) { (void)u; return g_base + (int64_t)(g_pushed * 1000ull / FS); }
 static void full(char *o, size_t sz, const char *p) { snprintf(o, sz, "%s%s", g_cur, p); }
-static int io_mkdir(void *u, const char *p) { (void)u; char b[300]; full(b, sizeof b, p); MKDIR(b); return 0; }
+static int io_mkdir(void *u, const char *p) { (void)u; char b[400]; full(b, sizeof b, p); MKDIR(b); return 0; }
 static void *io_open(void *u, const char *p, char m)
 {
-    (void)u; char b[300]; full(b, sizeof b, p);
+    (void)u; char b[400]; full(b, sizeof b, p);
     size_t l = strlen(p);
     if (m == 'w' && g_failopen > 0 && l > 4 && !strcmp(p + l - 4, ".WAV")) { g_failopen--; return NULL; }
     return fopen(b, m == 'r' ? "rb" : (m == 'a' ? "ab" : "wb"));
@@ -88,7 +88,7 @@ typedef struct { double seconds, stall_t0, stall_len; int32_t *rec; uint32_t wra
 static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64_t base, double bg, double mod)
 {
     snprintf(g_cur, sizeof g_cur, "%s/%s", g_root, name); MKDIR(g_cur);
-    char p[300]; snprintf(p, sizeof p, "%s/EVENTS.CSV", g_cur); remove(p);
+    char p[400]; snprintf(p, sizeof p, "%s/EVENTS.CSV", g_cur); remove(p);
     bursts = b; nb = n_b; curb = 0; for (int i = 0; i < nb; i++) bursts[i].sig = sigma_for(bursts[i].dba);
     bg_dba = bg; bg_mod_db = mod; sig_bg = sigma_for(bg); rng = 7; g_pushed = 0; g_base = base;
     nc_config_t cfg; nc_default_config(&cfg);
@@ -110,18 +110,18 @@ static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64
 
 static int count_rows(const char *rel)
 {
-    char p[300]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
+    char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
     FILE *f = fopen(p, "r"); if (!f) return -1;
     int n = 0, c; while ((c = fgetc(f)) != EOF) n += c == '\n';
     fclose(f); return n > 0 ? n - 1 : 0;
 }
-static int file_exists(const char *rel) { char p[300]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (f) fclose(f); return f != NULL; }
-static long file_size(const char *rel) { char p[300]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (!f) return -1; fseek(f, 0, SEEK_END); long n = ftell(f); fclose(f); return n; }
+static int file_exists(const char *rel) { char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (f) fclose(f); return f != NULL; }
+static long file_size(const char *rel) { char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (!f) return -1; fseek(f, 0, SEEK_END); long n = ftell(f); fclose(f); return n; }
 
 /* Pfad der n-ten CSV-Zeile (Spalte "datei") */
 static int csv_file(int row, char *out, size_t sz)
 {
-    char p[300], line[512]; snprintf(p, sizeof p, "%s/EVENTS.CSV", g_cur);
+    char p[400], line[512]; snprintf(p, sizeof p, "%s/EVENTS.CSV", g_cur);
     FILE *f = fopen(p, "r"); if (!f) return -1;
     int r = -1; while (fgets(line, sizeof line, f)) {
         if (r++ == row) { char *a = line; for (int k = 0; k < 13; k++) a = strchr(a, ';') + 1; char *e = strchr(a, ';'); *e = 0; snprintf(out, sz, "%s", a); fclose(f); return 0; }
@@ -132,8 +132,8 @@ static int csv_file(int row, char *out, size_t sz)
 /* WAV-Daten == Eingang? (Versatz wird gesucht) */
 static void check_bitexact(const int32_t *rec, uint64_t nrec, double around_s, const char *label)
 {
-    char rel[128]; CHECK(csv_file(1, rel, sizeof rel) == 0, "%s: Ereignis in CSV", label);
-    char p[300]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
+    char rel[64]; CHECK(csv_file(0, rel, sizeof rel) == 0, "%s: Ereignis in CSV", label);
+    char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
     FILE *f = fopen(p, "rb"); if (!f) { CHECK(0, "%s: WAV oeffnen", label); return; }
     uint8_t h[654]; if (fread(h, 1, 654, f) != 654) { CHECK(0, "kurz"); fclose(f); return; }
     uint32_t dbytes = h[650] | h[651] << 8 | h[652] << 16 | (uint32_t)h[653] << 24, ns = dbytes / 2;
@@ -180,7 +180,7 @@ int main(int argc, char **argv)
       run_sim("t4", &o, b, 1, B, 33.0, 0.0);
       CHECK(g_nc.events_total >= 1, "Ereignis gespeichert (%lu)", (unsigned long)g_nc.events_total);
       CHECK(g_nc.overruns > 0 || g_nc.fq_dropped > 0, "Verlust wird gezaehlt: ring %lu Samples, frames %lu", (unsigned long)g_nc.overruns, (unsigned long)g_nc.fq_dropped);
-      char rel[128]; csv_file(1, rel, sizeof rel); char p[300]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb");
+      char rel[64]; csv_file(0, rel, sizeof rel); char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb");
       uint8_t h[8] = {0}; if (f) { fread(h, 1, 8, f); fclose(f); }
       uint32_t riff = h[4] | h[5] << 8 | h[6] << 16 | (uint32_t)h[7] << 24;
       CHECK(f && (long)riff + 8 == file_size(rel), "WAV-Header konsistent (RIFF %lu + 8 == %ld)", (unsigned long)riff, file_size(rel)); }
@@ -188,7 +188,7 @@ int main(int argc, char **argv)
     printf("T5: 100 s Dauerlaerm 70 dB(A) ab 5 s: Obergrenze 60 s je Ereignis\n");
     { static burst_t b[1]; b[0] = (burst_t){ 5.0, 100.0, 70.0, 1e9, 0 }; sim_t o = { 110, 0, 0, NULL, 0 };
       run_sim("t5", &o, b, 1, B, 33.0, 0.0);
-      char rel[128]; csv_file(1, rel, sizeof rel);
+      char rel[64]; csv_file(0, rel, sizeof rel);
       CHECK(g_nc.events_total >= 2, "Ereignisse: %lu (mind. 2 erwartet)", (unsigned long)g_nc.events_total);
       long sz = file_size(rel);
       CHECK(sz > 0 && sz <= 654 + 66L * FS * 2, "erste WAV-Datei %.1f s (<= 61 s + Vor-/Nachlauf)", (sz - 654) / (2.0 * FS)); }
@@ -210,7 +210,7 @@ int main(int argc, char **argv)
       sim_t o = { 3.0 + 7.0 * NE + 3, 0, 0, NULL, 0 };
       run_sim("t8", &o, b, NE, ms_of(2026, 10, 3, 10, 0, 0), 33.0, 0.0);
       CHECK(g_nc.events_total == NE && count_rows("/EVENTS.CSV") == NE && count_rows("/261003/TAG.CSV") == NE, "%lu Ereignisse, %d Zeilen in EVENTS.CSV", (unsigned long)g_nc.events_total, count_rows("/EVENTS.CSV"));
-      char p[300]; snprintf(p, sizeof p, "%s/261003/TAG.SVG", g_cur); FILE *f = fopen(p, "rb"); char *buf = calloc(1, 400000); size_t n = f ? fread(buf, 1, 399999, f) : 0; if (f) fclose(f);
+      char p[400]; snprintf(p, sizeof p, "%s/261003/TAG.SVG", g_cur); FILE *f = fopen(p, "rb"); char *buf = calloc(1, 400000); size_t n = f ? fread(buf, 1, 399999, f) : 0; if (f) fclose(f);
       CHECK(n > 0 && strstr(buf, "ersten Ereignisse") != NULL && strstr(buf, "300 Ereignisse") != NULL, "Tagesplot nennt 300 Ereignisse und den Hinweis auf die Begrenzung (%zu Bytes)", n); free(buf); }
 
     printf("\n%s (%d Fehler)\n", failures ? "FEHLGESCHLAGEN" : "ALLE GRENZFALLTESTS BESTANDEN", failures);
