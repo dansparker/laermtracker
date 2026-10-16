@@ -9,7 +9,7 @@ Lärmereignisse (Türen auf/zu, Türknallen) in der Wohnung erkennen und mit
 | Teil | Stand |
 |---|---|
 | Kern `core/` (Pegel, Erkennung, WAV/SVG/CSV) | per CI getestet gegen unabhängige Referenzberechnung (`tests/`) |
-| Firmware `fw/` | baut in der CI (49 kB Flash, 115 kB RAM-Belegung inkl. Stack); **noch nicht auf Hardware ausprobiert** |
+| Firmware `fw/` | baut in der CI (54 kB Flash, 119 kB von 128 kB RAM inkl. Stack); **noch nicht auf Hardware ausprobiert** |
 
 Die Hardware-Schicht (I2S-DMA-Format, SDIO, RTC) ist nach Datenblatt/HAL geschrieben, aber
 ungetestet auf dem echten Board. Rückmeldungen/Issues sind willkommen.
@@ -23,10 +23,31 @@ ungetestet auf dem echten Board. Rückmeldungen/Issues sind willkommen.
   - `/YYMMDD/HHMMSS.WAV` – 16 bit mono, **Zeitmarken**: BWF-`bext` (Datum, Uhrzeit, TimeReference)
     plus Cue-Marker „Auslösung“, „LAFmax“, „Ende Aktivität“ (in Audacity/Reaper sichtbar)
   - `/YYMMDD/HHMMSS.SVG` – Pegel-Zeit-Plot (LAF, 125 ms; Max je 100 ms) mit LAeq-Linie, LAFmax-Marke
-  - `/EVENTS.CSV` – `datum;zeit;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;datei;ueberlaeufe`
+  - `/YYMMDD/TAG.SVG` – **Tagesdiagramm**: alle Ereignisse des Tages über der Uhrzeit (Höhe = LAFmax, Fuß =
+    Hintergrundpegel, Form = Tür/Knall/Sonstiges), Nachtzeit blau hinterlegt, Grenzwertlinien, Störungen rot;
+    wird nach jedem Ereignis aus `/YYMMDD/TAG.CSV` neu erzeugt
+  - `/EVENTS.CSV` (alle Tage) und `/YYMMDD/TAG.CSV` (ein Tag) –
+    `datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe`
+    (`zeit` = Auslösezeitpunkt, `stoerung` = 1/0)
 - Einstufung (Heuristik, Schwellen in `fw/Inc/config.h`):
   `KNALL` (LAFmax ≥ 75 dB(A)), `TUER` (impulshafter Anstieg ≥ 10 dB innerhalb 10 ms), sonst `SONST`
   (z. B. Stimmen, Staubsauger). Es wird keine Geräuschquelle „erkannt“, nur Impulshaltigkeit und Pegel.
+
+## Was gilt als „Lärmstörung“?
+Es gibt **keinen einzelnen gesetzlichen Amplitudenwert** für Türgeräusche in der Wohnung; Gerichte/Gutachter
+beurteilen im Einzelfall (Ortsüblichkeit, Zeit, Grundgeräuschpegel). Als objektive Orientierung markiert das Projekt
+ein Ereignis als **Störung**, wenn sein **LAFmax** (Innenraum, am Mikrofon) den zeitabhängigen Grenzwert erreicht:
+
+| Zeit (lokal) | Grenzwert LAFmax | Herkunft |
+|---|---|---|
+| Nacht 22–6 Uhr | **42 dB(A)** | WHO Night Noise Guidelines 2009: Schwelle für Aufwachreaktionen innen (die WHO-Community-Noise-Leitlinie 1999 nennt 45 dB für Schlafzimmer) |
+| Tag 6–22 Uhr | 55 dB(A) | **eigene Annahme** (kein Normwert), in `fw/Inc/config.h` anpassbar |
+
+Hinweise: Die Werte sind Orientierung, kein Rechtsgutachten. In Österreich werden Immissionen üblicherweise nach
+ÖAL-Richtlinie Nr. 3 / ÖNORM S 5004 und im Vergleich zum Grundgeräuschpegel beurteilt; die genauen
+Beurteilungskriterien bitte direkt dort nachlesen. Weil ein Ereignis erst ab `TRIG_MIN_DBA` (50 dB(A)) aufgezeichnet
+wird, werden nachts leisere Geräusche (42–50 dB(A)) nicht erfasst – dafür `TRIG_MIN_DBA` senken. Die Spalte
+`ueber_dB` zeigt, wie weit der Grenzwert überschritten wurde; Hintergrund und LAeq/LAE stehen zum Vergleich daneben.
 
 ## Pegel / „objektivierbare“ Dezibelwerte
 - ICS-43434: 94 dB SPL @ 1 kHz = −26 dBFS → daraus Schalldruckpegel; A-Bewertung als IIR-Filter
