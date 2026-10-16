@@ -6,3 +6,5 @@ out/
 *.hex
 *.map
 fw/deps/
+out_edge/
+dist/

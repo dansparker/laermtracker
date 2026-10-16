@@ -5,16 +5,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Kern ohne Warnungen uebersetzen
+        run: make lint
       - name: Kern kompilieren und testen
         run: make test
       - name: Ausgabedateien pruefen (WAV/SVG/CSV)
         run: python3 tests/check_outputs.py out
+      - name: Grenzfalltests
+        run: make test-edge
       - name: Ausgabedateien sichern
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-ausgabe
           path: out/
+  sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tests mit AddressSanitizer + UBSan
+        run: |
+          make test test-edge CFLAGS="-O1 -g -std=c99 -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
   firmware:
     runs-on: ubuntu-latest
     steps:
