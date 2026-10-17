@@ -39,7 +39,7 @@ for p in sorted(glob.glob(os.path.join(out, "*", "2[12]*.SVG"))):
     pts = [e for e in r.iter() if e.tag.endswith("polyline")][0].get("points").split()
     check(len(pts) >= 20, f"{p}: gueltiges XML, {len(pts)} Plotpunkte")
 rows = open(os.path.join(out, "EVENTS.CSV"), encoding="utf-8").read().strip().splitlines()
-check(len(rows) == 5 and rows[0].startswith("datum;") and rows[0].count(";") == 14, "EVENTS.CSV: Kopf (15 Spalten) + 4 Zeilen")
+check(len(rows) == 5 and rows[0].startswith("datum;") and rows[0].count(";") == 15, "EVENTS.CSV: Kopf (15 Spalten) + 4 Zeilen")
 check([r.split(";")[12] for r in rows[1:]] == ["0", "1", "1", "1"], "Stoerungsspalte: 0,1,1,1")
 day = open(os.path.join(out, "261003", "TAG.CSV"), encoding="utf-8").read().strip().splitlines()
 check(day == rows, "TAG.CSV == EVENTS.CSV (alle Ereignisse an einem Tag)")

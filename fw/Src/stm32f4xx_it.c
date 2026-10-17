@@ -1,6 +1,7 @@
 #include "stm32f4xx_hal.h"
 
 extern DMA_HandleTypeDef hdma_spi2_rx;
+extern SD_HandleTypeDef hsd;
 
 void NMI_Handler(void) { for (;;) {} }
 void HardFault_Handler(void) { for (;;) {} }
@@ -12,3 +13,6 @@ void DebugMon_Handler(void) {}
 void PendSV_Handler(void) {}
 void SysTick_Handler(void) { HAL_IncTick(); }
 void DMA1_Stream3_IRQHandler(void) { HAL_DMA_IRQHandler(&hdma_spi2_rx); }
+void SDIO_IRQHandler(void) { HAL_SD_IRQHandler(&hsd); }
+void DMA2_Stream3_IRQHandler(void) { HAL_DMA_IRQHandler(hsd.hdmarx); }
+void DMA2_Stream6_IRQHandler(void) { HAL_DMA_IRQHandler(hsd.hdmatx); }

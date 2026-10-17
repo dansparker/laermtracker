@@ -15,6 +15,7 @@
 #define PRE_MS             1000u
 #define POST_MS            3000u
 #define SLAM_LAFMAX_DBA    75.0f
+#define KEEP_SONST         0        /* 0 = nur impulshafte Ereignisse (Tuer/Knall) behalten, Stimmen/Brummen verwerfen */
 
 /* Stoerungskriterium: LAFmax >= Grenzwert (Innenraum am Mikrofon), Zeiten lokal */
 #define NIGHT_START_H      22

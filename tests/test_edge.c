@@ -51,6 +51,8 @@ static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; retu
 static int io_seek(void *u, void *h, uint32_t p) { (void)u; return fseek((FILE *)h, (long)p, SEEK_SET); }
 static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
+static int io_remove(void *u, const char *p) { (void)u; char b[400]; full(b, sizeof b, p); return remove(b); }
+static int g_keep_sonst = 1;
 
 static int64_t days_from_civil(int y, int m, int d)
 {
@@ -61,7 +63,7 @@ static int64_t days_from_civil(int y, int m, int d)
 static int64_t ms_of(int y, int mo, int d, int h, int mi, int s) { return (days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + s) * 1000; }
 
 /* ---- Signal ---- */
-typedef struct { double t0, dur, dba, tau, sig; } burst_t;
+typedef struct { double t0, dur, dba, tau, sig, att; } burst_t;
 static burst_t *bursts; static int nb, curb;
 static double bg_dba, bg_mod_db, sig_bg, g2, ref_rms2;
 static uint32_t rng;
@@ -77,7 +79,7 @@ static void gen_block(uint64_t i0, uint32_t n, int32_t *out)
         while (curb < nb && t > bursts[curb].t0 + bursts[curb].dur) curb++;
         if (curb < nb && t >= bursts[curb].t0) {
             double e = t - bursts[curb].t0;
-            x += bursts[curb].sig * (1.0 - exp(-e / 0.002)) * exp(-e / bursts[curb].tau) * gauss();
+            x += bursts[curb].sig * (1.0 - exp(-e / (bursts[curb].att > 0 ? bursts[curb].att : 0.002))) * exp(-e / bursts[curb].tau) * gauss();
         }
         long v = lrint(x); out[k] = (int32_t)(v > 8388607 ? 8388607 : (v < -8388608 ? -8388608 : v));
     }
@@ -92,7 +94,8 @@ static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64
     bursts = b; nb = n_b; curb = 0; for (int i = 0; i < nb; i++) bursts[i].sig = sigma_for(bursts[i].dba);
     bg_dba = bg; bg_mod_db = mod; sig_bg = sigma_for(bg); rng = 7; g_pushed = 0; g_base = base;
     nc_config_t cfg; nc_default_config(&cfg);
-    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read };
+    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
+    cfg.keep_sonst = (uint8_t)g_keep_sonst;
     nc_init(&g_nc, &cfg, &io, g_ring, RING);
     if (o->wrap_offset) { g_nc.wr = g_nc.M - o->wrap_offset; g_nc.widx = g_nc.wr % g_nc.ring_len; }
     static int32_t blk[256];
@@ -212,6 +215,14 @@ int main(int argc, char **argv)
       CHECK(g_nc.events_total == NE && count_rows("/EVENTS.CSV") == NE && count_rows("/261003/TAG.CSV") == NE, "%lu Ereignisse, %d Zeilen in EVENTS.CSV", (unsigned long)g_nc.events_total, count_rows("/EVENTS.CSV"));
       char p[400]; snprintf(p, sizeof p, "%s/261003/TAG.SVG", g_cur); FILE *f = fopen(p, "rb"); char *buf = calloc(1, 400000); size_t n = f ? fread(buf, 1, 399999, f) : 0; if (f) fclose(f);
       CHECK(n > 0 && strstr(buf, "ersten Ereignisse") != NULL && strstr(buf, "300 Ereignisse") != NULL, "Tagesplot nennt 300 Ereignisse und den Hinweis auf die Begrenzung (%zu Bytes)", n); free(buf); }
+
+    printf("T9: keep_sonst=0 - abrupte Tuer bleibt, langsam anschwellendes Geraeusch (SONST) wird geloescht\n");
+    { static burst_t b[2]; b[0] = (burst_t){ 3.0, 0.5, 78.0, 0.08, 0, 0 }; b[1] = (burst_t){ 15.0, 3.0, 66.0, 2.0, 0, 1.0 }; sim_t o = { 25, 0, 0, NULL, 0 };
+      g_keep_sonst = 0; run_sim("t9", &o, b, 2, B, 33.0, 0.0); g_keep_sonst = 1;
+      CHECK(g_nc.events_total == 1 && g_nc.events_dropped == 1 && count_rows("/EVENTS.CSV") == 1,
+            "gespeichert %lu, verworfen %lu, CSV-Zeilen %d", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped, count_rows("/EVENTS.CSV"));
+      char rel[64]; csv_file(0, rel, sizeof rel);
+      CHECK(strstr(rel, ".WAV") != NULL && file_size(rel) > 654 && g_nc.io_errors == 0, "WAV des Tuergeraeusches vorhanden (%ld Bytes), Schreibfehler %lu", file_size(rel), (unsigned long)g_nc.io_errors); }
 
     printf("\n%s (%d Fehler)\n", failures ? "FEHLGESCHLAGEN" : "ALLE GRENZFALLTESTS BESTANDEN", failures);
     return failures != 0;

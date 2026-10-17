@@ -58,6 +58,11 @@ static int io_printf(nc_t *n, void *h, const char *fmt, ...)
     return n->io.write(n->io.user, h, b, (uint32_t)len);
 }
 
+static void wwrite(nc_t *n, const void *b, uint32_t len)      /* WAV-Schreibzugriff, Fehler werden gezaehlt */
+{
+    if (n->io.write(n->io.user, n->wav, b, len)) n->io_errors++;
+}
+
 /* ------------------------------------------------------------ A-Bewertung */
 
 static void aw_section(nc_biquad_t *q, double fs, int m, double f1, double f2)
@@ -132,6 +137,7 @@ void nc_default_config(nc_config_t *c)
     c->night_end_h = 6;
     c->lim_night_dba = 42.0f;
     c->lim_day_dba = 55.0f;
+    c->keep_sonst = 1;
 }
 
 void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, uint32_t ring_len)
@@ -171,7 +177,7 @@ static void drain(nc_t *n, int all)
             n->chunk[i] = n->ring[ri];
             if (++ri == n->ring_len) ri = 0;
         }
-        n->io.write(n->io.user, n->wav, n->chunk, cnt * 2);
+        wwrite(n, n->chunk, cnt * 2);
         n->wav_data_bytes += cnt * 2;
         n->rd = (uint32_t)(((uint64_t)n->rd + cnt) % n->M);
     }
@@ -196,7 +202,7 @@ static void wav_begin(nc_t *n, int y, int mo, int d, int h, int mi, int s, int m
     put32(b + 382, (uint32_t)tr); put32(b + 386, (uint32_t)(tr >> 32));
     put16(b + 390, 1);
     memcpy(b + 646, "data", 4);
-    n->io.write(n->io.user, n->wav, b, WAV_DATA_START);
+    wwrite(n, b, WAV_DATA_START);
     n->wav_data_bytes = 0;
 }
 
@@ -301,7 +307,7 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
 
 /* ------------------------------------------------- CSV + Tagesdiagramm */
 
-#define CSV_HEAD "datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe\n"
+#define CSV_HEAD "datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe;schreibfehler\n"
 
 static void csv_append(nc_t *n, const char *path, const char *row)
 {
@@ -449,7 +455,7 @@ static void finish_event(nc_t *n)
         wav_label(&p, i + 1, t);
     }
     put32(list + 4, (uint32_t)(p - list - 8));
-    n->io.write(n->io.user, n->wav, b, (uint32_t)(p - b));
+    wwrite(n, b, (uint32_t)(p - b));
 
     /* Kennwerte */
     uint32_t cn = n->ev_n_snap ? n->ev_n_snap : 1;
@@ -461,12 +467,21 @@ static void finish_event(nc_t *n)
     snprintf(desc, sizeof desc, "%s LAeq=%s dB(A) LAFmax=%s dB(A) Lpeak=%s dB", cls, a, bb, c);
     uint32_t total = WAV_DATA_START + n->wav_data_bytes + (uint32_t)(p - b);
     uint8_t hdr[4];
-    n->io.seek(n->io.user, n->wav, 4);   put32(hdr, total - 8);              n->io.write(n->io.user, n->wav, hdr, 4);
-    n->io.seek(n->io.user, n->wav, 650); put32(hdr, n->wav_data_bytes);       n->io.write(n->io.user, n->wav, hdr, 4);
+    n->io.seek(n->io.user, n->wav, 4);   put32(hdr, total - 8);              wwrite(n, hdr, 4);
+    n->io.seek(n->io.user, n->wav, 650); put32(hdr, n->wav_data_bytes);       wwrite(n, hdr, 4);
     uint8_t dz[256]; memset(dz, 0, sizeof dz); memcpy(dz, desc, strlen(desc));
-    n->io.seek(n->io.user, n->wav, WAV_BEXT_DESC); n->io.write(n->io.user, n->wav, dz, sizeof dz);
+    n->io.seek(n->io.user, n->wav, WAV_BEXT_DESC); wwrite(n, dz, sizeof dz);
     n->io.close(n->io.user, n->wav);
     n->wav = NULL;
+
+    if (!n->cfg.keep_sonst && cls[0] == 'S' && n->io.remove) {   /* kein Tuergeraeusch: Aufnahme wieder loeschen */
+        char wp[32];
+        snprintf(wp, sizeof wp, "/%s/%s.WAV", n->dir, n->base);
+        n->io.remove(n->io.user, wp);
+        n->events_dropped++;
+        n->state = NC_IDLE;
+        return;
+    }
 
     if (n->bin_cnt) { if (n->plot_n < NC_MAX_PLOT_BINS) n->plot[n->plot_n++] = n->bin_max; n->bin_cnt = 0; }
 
@@ -487,9 +502,9 @@ static void finish_event(nc_t *n)
     snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
     fmt1(lp, sizeof lp, lae); fmt1(bgs, sizeof bgs, n->ev_bg);
     fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
-    snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu\n",
+    snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu;%lu\n",
              ty, tmo, td, th, tmi, ts, tms, night ? "NACHT" : "TAG", cls, dur, a, bb, c, lp, bgs, lm, ov, dist,
-             n->dir, n->base, (unsigned long)n->overruns);
+             n->dir, n->base, (unsigned long)n->overruns, (unsigned long)n->io_errors);
     csv_append(n, "/EVENTS.CSV", row);
     snprintf(path, sizeof path, "/%s/TAG.CSV", n->dir);
     csv_append(n, path, row);

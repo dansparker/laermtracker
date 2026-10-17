@@ -45,6 +45,7 @@ static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; retu
 static int io_seek(void *u, void *h, uint32_t p) { (void)u; return fseek((FILE *)h, (long)p, SEEK_SET); }
 static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
+static int io_remove(void *u, const char *p) { (void)u; char b[300]; path_of(b, sizeof b, p); return remove(b); }
 
 static int64_t days_from_civil(int y, int m, int d)
 {
@@ -160,7 +161,7 @@ int main(int argc, char **argv)
 
     /* 3) Kern laufen lassen */
     nc_config_t cfg; nc_default_config(&cfg);
-    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read };
+    nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
     static int16_t ring[48000];
     nc_init(&g_nc, &cfg, &io, ring, 48000);
     t_base = (days_from_civil(2026, 10, 3) * 86400 + 21 * 3600 + 59 * 60 + 30) * 1000;   /* 21:59:30 -> Nachtgrenze 22:00 wird ueberschritten */

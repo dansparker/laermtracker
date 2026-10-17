@@ -11,6 +11,7 @@
 #include <string.h>
 
 SD_HandleTypeDef hsd;                         /* von diskio.c benutzt */
+static DMA_HandleTypeDef hdma_sdio_rx, hdma_sdio_tx;
 DMA_HandleTypeDef hdma_spi2_rx;               /* von stm32f4xx_it.c benutzt */
 static I2S_HandleTypeDef  hi2s2;
 static RTC_HandleTypeDef  hrtc;
@@ -105,6 +106,30 @@ void HAL_SD_MspInit(SD_HandleTypeDef *h)
     HAL_GPIO_Init(GPIOC, &g);
     g.Pin = GPIO_PIN_2; g.Pull = GPIO_PULLUP;                          /* CMD */
     HAL_GPIO_Init(GPIOD, &g);
+    /* SDIO per DMA: Polling-Transfers scheitern an FIFO-Unterlaeufen, sobald der Audio-Interrupt dazwischenfunkt */
+    __HAL_RCC_DMA2_CLK_ENABLE();
+    DMA_HandleTypeDef *d[2] = { &hdma_sdio_rx, &hdma_sdio_tx };
+    for (int i = 0; i < 2; i++) {
+        d[i]->Instance = i ? DMA2_Stream6 : DMA2_Stream3;
+        d[i]->Init.Channel = DMA_CHANNEL_4;
+        d[i]->Init.Direction = i ? DMA_MEMORY_TO_PERIPH : DMA_PERIPH_TO_MEMORY;
+        d[i]->Init.PeriphInc = DMA_PINC_DISABLE;
+        d[i]->Init.MemInc = DMA_MINC_ENABLE;
+        d[i]->Init.PeriphDataAlignment = DMA_PDATAALIGN_WORD;
+        d[i]->Init.MemDataAlignment = DMA_MDATAALIGN_WORD;
+        d[i]->Init.Mode = DMA_PFCTRL;
+        d[i]->Init.Priority = DMA_PRIORITY_VERY_HIGH;
+        d[i]->Init.FIFOMode = DMA_FIFOMODE_ENABLE;
+        d[i]->Init.FIFOThreshold = DMA_FIFO_THRESHOLD_FULL;
+        d[i]->Init.MemBurst = DMA_MBURST_INC4;
+        d[i]->Init.PeriphBurst = DMA_PBURST_INC4;
+        if (HAL_DMA_Init(d[i]) != HAL_OK) fatal();
+    }
+    __HAL_LINKDMA(h, hdmarx, hdma_sdio_rx);
+    __HAL_LINKDMA(h, hdmatx, hdma_sdio_tx);
+    HAL_NVIC_SetPriority(SDIO_IRQn, 2, 0);          HAL_NVIC_EnableIRQ(SDIO_IRQn);
+    HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 2, 0);  HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+    HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 2, 0);  HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
 }
 
 /* ------------------------------------------------------------------ RTC / Zeit */
@@ -177,6 +202,7 @@ static void *io_open(void *u, const char *p, char mode)
 }
 static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; UINT w; return (f_write((FIL *)h, b, n, &w) == FR_OK && w == n) ? 0 : -1; }
 static int io_seek(void *u, void *h, uint32_t pos) { (void)u; return f_lseek((FIL *)h, pos) == FR_OK ? 0 : -1; }
+static int io_remove(void *u, const char *p) { (void)u; return f_unlink(p) == FR_OK ? 0 : -1; }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; UINT r; return f_read((FIL *)h, b, n, &r) == FR_OK ? (int32_t)r : -1; }
 static int io_close(void *u, void *h) { (void)u; file_used[(FIL *)h - files] = 0; return f_close((FIL *)h) == FR_OK ? 0 : -1; }
 
@@ -221,8 +247,8 @@ int main(void)
     cfg.fs = SAMPLE_RATE_HZ; cfg.cal_offset_db = CAL_OFFSET_DB; cfg.trig_delta_db = TRIG_DELTA_DB;
     cfg.trig_min_dba = TRIG_MIN_DBA; cfg.pre_ms = PRE_MS; cfg.post_ms = POST_MS; cfg.slam_lafmax_dba = SLAM_LAFMAX_DBA;
     cfg.night_start_h = NIGHT_START_H; cfg.night_end_h = NIGHT_END_H;
-    cfg.lim_night_dba = LIM_NIGHT_DBA; cfg.lim_day_dba = LIM_DAY_DBA;
-    nc_io_t io = { NULL, rtc_now_ms, io_mkdir, io_open, io_write, io_seek, io_close, io_read };
+    cfg.lim_night_dba = LIM_NIGHT_DBA; cfg.lim_day_dba = LIM_DAY_DBA; cfg.keep_sonst = KEEP_SONST;
+    nc_io_t io = { NULL, rtc_now_ms, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
     nc_init(&nc, &cfg, &io, ring, RING_SAMPLES);
 
     hi2s2.Instance = SPI2;

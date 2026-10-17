@@ -39,6 +39,7 @@ typedef struct {
     uint8_t  night_end_h;      /* Nachtzeit bis                                    */
     float    lim_night_dba;    /* Grenzwert nachts (WHO 2009: 42 dB LAmax innen)   */
     float    lim_day_dba;      /* Grenzwert tags (eigene Annahme, anpassbar)       */
+    uint8_t  keep_sonst;       /* 0 = nicht impulshafte Ereignisse (SONST) wieder loeschen */
 } nc_config_t;
 
 typedef struct {
@@ -50,6 +51,7 @@ typedef struct {
     int     (*seek)(void *user, void *h, uint32_t pos);
     int     (*close)(void *user, void *h);
     int32_t (*read)(void *user, void *h, void *buf, uint32_t n);  /* gelesene Bytes, 0 = Ende, <0 Fehler */
+    int     (*remove)(void *user, const char *path);              /* Datei loeschen, 0 = ok */
 } nc_io_t;
 
 #define NC_MAX_PLOT_BINS   720          /* 100-ms-Bins => 72 s */
@@ -129,6 +131,8 @@ typedef struct {
     uint32_t    wav_data_bytes;
     uint32_t    events_total;
     uint32_t    holdoff;            /* Frames Pause nach SD-Fehler */
+    uint32_t    io_errors;          /* fehlgeschlagene Schreibzugriffe auf die WAV-Datei */
+    uint32_t    events_dropped;     /* verworfene SONST-Ereignisse (keep_sonst = 0) */
     float       ev_limit;           /* Grenzwert des laufenden Ereignisses */
     uint8_t     ev_dist, ev_night;  /* Stoerung? / Nachtzeit? */
     nc_dayev_t  day[NC_DAY_MAX];    /* Arbeitsspeicher fuer das Tagesdiagramm */
