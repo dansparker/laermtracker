@@ -68,7 +68,7 @@ wird, werden nachts leisere Geräusche (42–50 dB(A)) nicht erfasst – dafür 
 | BCLK | PB13 |
 | DOUT | PB15 |
 
-SD-Karte: SDIO 4-Bit (PC8–PC12, PD2, auf dem Board verdrahtet), FAT32. Status-LED PB2:
+SD-Karte: SDIO 4-Bit (PC8–PC12, PD2, auf dem Board verdrahtet), FAT32. Status-LED PB2 (blau, high = an):
 an = Ereignis wird aufgezeichnet, 3× Blinken = bereit, schnelles Blinken = Fehler (SD/Takt).
 
 ## Uhrzeit

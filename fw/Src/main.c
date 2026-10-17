@@ -1,7 +1,7 @@
 /*
  * Laermtracker - Firmware fuer WeAct STM32F446 CoreBoard
  *   ICS-43434 an I2S2 (PB12 WS, PB13 CK, PB15 SD), microSD an SDIO (4 Bit), RTC mit LSE.
- *   LED PB2 (low-aktiv): an waehrend ein Ereignis aufgezeichnet wird; schnelles Blinken = Fehler.
+ *   LED PB2 (high = an): an waehrend ein Ereignis aufgezeichnet wird; schnelles Blinken = Fehler.
  */
 #include "stm32f4xx_hal.h"
 #include "ff.h"
@@ -30,7 +30,7 @@ static uint16_t dma_buf[DMA_WORDS * 2];       /* je 32-bit-Wort zwei Halbworte (
 
 /* ------------------------------------------------------------------ LED / Fehler */
 static void led(int on);
-static void led(int on) { HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, on ? GPIO_PIN_RESET : GPIO_PIN_SET); }
+static void led(int on) { HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, on ? GPIO_PIN_SET : GPIO_PIN_RESET); }   /* LED an PB2: high = an */
 static void fatal(void) { for (;;) { HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_2); HAL_Delay(100); } }
 
 /* ------------------------------------------------------------------ Takte */
@@ -296,9 +296,10 @@ int main(void)
 
     diag_channels();
     for (int i = 0; i < 3; i++) { led(1); HAL_Delay(80); led(0); HAL_Delay(120); }   /* bereit */
-    IWDG->KR = 0x5555; IWDG->PR = 4; IWDG->RLR = 4000;   /* Watchdog: LSI/64, ca. 8 s */
-    while (IWDG->SR) {}
-    IWDG->KR = 0xCCCC;
+    IWDG->KR = 0xCCCC;                                   /* Watchdog zuerst starten (schaltet LSI ein), dann konfigurieren */
+    IWDG->KR = 0x5555; IWDG->PR = 4; IWDG->RLR = 4000;   /* LSI/64, ca. 8 s */
+    for (uint32_t i = 0; IWDG->SR && i < 2000000u; i++) {}
+    IWDG->KR = 0xAAAA;
     for (;;) {
         WDG_KICK();
         nc_poll(&nc);
