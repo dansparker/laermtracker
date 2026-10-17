@@ -126,7 +126,7 @@ void nc_default_config(nc_config_t *c)
     c->cal_offset_db = 0.0f;
     c->trig_delta_db = 12.0f;
     c->trig_min_dba = 50.0f;
-    c->end_delta_db = 6.0f;
+    c->end_delta_db = 8.0f;
     c->end_hyst_db = 6.0f;
     c->pre_ms = 1000;
     c->post_ms = 3000;
@@ -160,6 +160,32 @@ void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, ui
 static uint32_t pdist(const nc_t *n, uint32_t a, uint32_t b) { return b >= a ? b - a : b + (n->M - a); }
 static uint32_t psub(const nc_t *n, uint32_t a, uint32_t d)  { return a >= d ? a - d : a + (n->M - d); }
 
+/* Waehrend eines SD-Zugriffs koppelt Schaltrauschen (Klicks, Pegelanhebung) in das Mikrofon ein. Die in dieser Zeit
+ * aufgenommenen Frames werden fuer Ausloesung, Ereignisende und Kennwerte ignoriert (die Audiodaten bleiben unveraendert). */
+static void blank_add(nc_t *n, uint32_t p0)
+{
+    uint32_t p1 = n->wr;
+    if (p1 == p0) return;
+    uint32_t from = psub(n, p0, n->frame_len), to = (uint32_t)(((uint64_t)p1 + 2u * n->frame_len) % n->M);
+    if (n->blk_n && pdist(n, from, n->blk_to[n->blk_n - 1]) < n->M / 2) { n->blk_to[n->blk_n - 1] = to; return; }   /* ueberlappt: erweitern */
+    if (n->blk_n == NC_BLK) { n->blk_to[NC_BLK - 1] = to; return; }
+    n->blk_from[n->blk_n] = from; n->blk_to[n->blk_n] = to; n->blk_n++;
+}
+
+static int is_blank(nc_t *n, uint32_t pos)
+{
+    int hit = 0; uint32_t k = 0;
+    for (uint32_t i = 0; i < n->blk_n; i++)
+        if (pdist(n, n->blk_from[i], pos) <= pdist(n, n->blk_from[i], n->blk_to[i])) hit = 1;
+    for (uint32_t i = 0; i < n->blk_n; i++) {                 /* Bereiche vor dieser Position entfernen */
+        uint32_t d = pdist(n, n->blk_to[i], pos);
+        if (d > 0 && d < n->M / 2) continue;
+        n->blk_from[k] = n->blk_from[i]; n->blk_to[k] = n->blk_to[i]; k++;
+    }
+    n->blk_n = k;
+    return hit;
+}
+
 static void drain(nc_t *n, int all)
 {
     if (!n->wav) return;
@@ -177,7 +203,9 @@ static void drain(nc_t *n, int all)
             n->chunk[i] = n->ring[ri];
             if (++ri == n->ring_len) ri = 0;
         }
+        uint32_t p0 = n->wr;
         wwrite(n, n->chunk, cnt * 2);
+        blank_add(n, p0);
         n->wav_data_bytes += cnt * 2;
         n->rd = (uint32_t)(((uint64_t)n->rd + cnt) % n->M);
     }
@@ -431,7 +459,7 @@ static void write_day_svg(nc_t *n)
     #undef DY
 }
 
-static void finish_event(nc_t *n)
+static void finish_event_inner(nc_t *n)
 {
     drain(n, 1);
     /* Zeitmarken (cue + labl) hinter die Audiodaten */
@@ -533,7 +561,7 @@ static float end_threshold(const nc_t *n)
 static void event_account(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t idx)
 {
     n->ev_sumA += meansq; n->ev_n++;
-    if (L >= end_threshold(n)) {
+    if (laf >= end_threshold(n)) {                            /* Aktivitaet: LAF (125 ms), nicht der 10-ms-Pegel (Zufallsspitzen) */
         n->ev_last_active = idx;
         n->ev_sumA_snap = n->ev_sumA; n->ev_n_snap = n->ev_n;
     }
@@ -542,7 +570,7 @@ static void event_account(nc_t *n, float L, float laf, float lpk, double meansq,
     if (L - n->prev_db > n->ev_rise) n->ev_rise = L - n->prev_db;
 }
 
-static void start_event(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
+static void start_event_inner(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
 {
     uint32_t ring_frames = n->ring_len / n->frame_len;
     uint32_t pre = n->cfg.pre_ms / 10;
@@ -580,8 +608,24 @@ static void start_event(nc_t *n, float L, float laf, float lpk, double meansq, u
     event_account(n, L, laf, lpk, meansq, pre);
 }
 
+static void start_event(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
+{
+    uint32_t p0 = n->wr;
+    start_event_inner(n, L, laf, lpk, meansq, endpos);
+    blank_add(n, p0);
+}
+
+static void finish_event(nc_t *n)
+{
+    uint32_t p0 = n->wr;
+    finish_event_inner(n);
+    blank_add(n, p0);
+    n->holdoff = 150;                                         /* 1,5 s Pause: Nachklingen / Schaltrauschen nicht als neues Ereignis werten */
+}
+
 static void frame_consume(nc_t *n, const nc_frame_t *fr)
 {
+    int blank = is_blank(n, fr->pos);
     double meansq = fr->meansq;
     if (meansq < 1e-3) meansq = 1e-3;
     float cal = NC_REF_SPL_DB + n->cfg.cal_offset_db;
@@ -591,7 +635,7 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
 
     const float alpha = 1.0f - expf(-0.010f / 0.125f);     /* Fast: tau = 125 ms */
     if (n->frames_seen == 0) n->laf_energy = (float)meansq;
-    else n->laf_energy += alpha * ((float)meansq - n->laf_energy);
+    else if (!blank) n->laf_energy += alpha * ((float)meansq - n->laf_energy);
     float laf = 10.0f * log10f(n->laf_energy / n->ref_rms2) + cal;
     float lafc = laf < 0 ? 0 : laf;
     n->hist[n->hist_n % NC_HIST_FRAMES] = (uint16_t)(lafc * 10.0f + 0.5f);
@@ -602,7 +646,9 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
         float thr = n->bg_db + n->cfg.trig_delta_db;
         if (thr < n->cfg.trig_min_dba) thr = n->cfg.trig_min_dba;
         if (n->frames_seen <= 100) {
-            n->bg_db = n->frames_seen == 1 ? L : n->bg_db + (L - n->bg_db) * 0.05f;
+            if (!blank || n->frames_seen == 1) n->bg_db = n->frames_seen == 1 ? L : n->bg_db + (L - n->bg_db) * 0.05f;
+        } else if (blank) {
+            /* SD-Zugriff: Frame ignorieren */
         } else if (n->holdoff) {
             n->holdoff--;
         } else if (L >= thr) {
@@ -615,12 +661,12 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
     } else {
         uint32_t idx = n->ev_frames++;
         plot_add(n, (int16_t)n->hist[(n->hist_n - 1) % NC_HIST_FRAMES]);
-        event_account(n, L, laf, lpk, meansq, idx);
+        if (!blank) event_account(n, L, laf, lpk, meansq, idx);
         drain(n, 0);
         if (idx - n->ev_last_active >= n->ev_post_frames || n->ev_frames >= n->ev_max_frames)
             finish_event(n);
     }
-    n->prev_db = L;
+    if (!blank) n->prev_db = L;
 }
 
 void nc_push24(nc_t *n, const int32_t *s, uint32_t count)

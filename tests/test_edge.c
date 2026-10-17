@@ -47,7 +47,9 @@ static void *io_open(void *u, const char *p, char m)
     if (m == 'w' && g_failopen > 0 && l > 4 && !strcmp(p + l - 4, ".WAV")) { g_failopen--; return NULL; }
     return fopen(b, m == 'r' ? "rb" : (m == 'a' ? "ab" : "wb"));
 }
-static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; return fwrite(b, 1, n, (FILE *)h) == n ? 0 : -1; }
+static void inject_noise(void);
+static int g_inject;
+static int io_write(void *u, void *h, const void *b, uint32_t n) { (void)u; if (g_inject) inject_noise(); return fwrite(b, 1, n, (FILE *)h) == n ? 0 : -1; }
 static int io_seek(void *u, void *h, uint32_t p) { (void)u; return fseek((FILE *)h, (long)p, SEEK_SET); }
 static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
@@ -85,6 +87,18 @@ static void gen_block(uint64_t i0, uint32_t n, int32_t *out)
     }
 }
 
+static uint64_t g_i;
+/* Simuliert Schaltrauschen der SD-Karte: waehrend jedes Schreibzugriffs laufen 20 ms Signal mit +66 dB(A)-Rauschen weiter ein
+ * (wie der Audio-Interrupt, der waehrend des blockierenden Zugriffs weiterarbeitet) */
+static void inject_noise(void)
+{
+    static int32_t nb[320];
+    gen_block(g_i, 320, nb);
+    double sg = sigma_for(66.0);
+    for (int k = 0; k < 320; k++) { long v = nb[k] + lrint(sg * gauss()); nb[k] = (int32_t)(v > 8388607 ? 8388607 : (v < -8388608 ? -8388608 : v)); }
+    nc_push24(&g_nc, nb, 320); g_pushed += 320; g_i += 320;
+}
+
 typedef struct { double seconds, stall_t0, stall_len; int32_t *rec; uint32_t wrap_offset; } sim_t;
 
 static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64_t base, double bg, double mod)
@@ -100,12 +114,14 @@ static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64
     if (o->wrap_offset) { g_nc.wr = g_nc.M - o->wrap_offset; g_nc.widx = g_nc.wr % g_nc.ring_len; }
     static int32_t blk[256];
     uint64_t N = (uint64_t)(o->seconds * FS);
-    for (uint64_t i = 0; i < N; i += 256) {
-        uint32_t m = (uint32_t)(N - i < 256 ? N - i : 256);
-        gen_block(i, m, blk);
-        if (o->rec) memcpy(o->rec + i, blk, m * sizeof(int32_t));
+    g_i = 0;
+    while (g_i < N) {
+        uint32_t m = (uint32_t)(N - g_i < 256 ? N - g_i : 256);
+        gen_block(g_i, m, blk);
+        if (o->rec) memcpy(o->rec + g_i, blk, m * sizeof(int32_t));
         nc_push24(&g_nc, blk, m); g_pushed += m;
-        double t = (double)i / FS;
+        double t = (double)g_i / FS;
+        g_i += m;
         if (!(o->stall_len > 0 && t >= o->stall_t0 && t < o->stall_t0 + o->stall_len)) nc_poll(&g_nc);
     }
     nc_poll(&g_nc); nc_flush(&g_nc);
@@ -121,16 +137,17 @@ static int count_rows(const char *rel)
 static int file_exists(const char *rel) { char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (f) fclose(f); return f != NULL; }
 static long file_size(const char *rel) { char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel); FILE *f = fopen(p, "rb"); if (!f) return -1; fseek(f, 0, SEEK_END); long n = ftell(f); fclose(f); return n; }
 
-/* Pfad der n-ten CSV-Zeile (Spalte "datei") */
-static int csv_file(int row, char *out, size_t sz)
+/* Spalte col der n-ten Datenzeile von EVENTS.CSV */
+static int csv_col(int row, int col, char *out, size_t sz)
 {
     char p[400], line[512]; snprintf(p, sizeof p, "%s/EVENTS.CSV", g_cur);
     FILE *f = fopen(p, "r"); if (!f) return -1;
     int r = -1; while (fgets(line, sizeof line, f)) {
-        if (r++ == row) { char *a = line; for (int k = 0; k < 13; k++) a = strchr(a, ';') + 1; char *e = strchr(a, ';'); *e = 0; snprintf(out, sz, "%s", a); fclose(f); return 0; }
+        if (r++ == row) { char *a = line; for (int k = 0; k < col; k++) a = strchr(a, ';') + 1; char *e = a + strcspn(a, ";\n"); *e = 0; snprintf(out, sz, "%s", a); fclose(f); return 0; }
     }
     fclose(f); return -1;
 }
+static int csv_file(int row, char *out, size_t sz) { return csv_col(row, 13, out, sz); }
 
 /* WAV-Daten == Eingang? (Versatz wird gesucht) */
 static void check_bitexact(const int32_t *rec, uint64_t nrec, double around_s, const char *label)
@@ -223,6 +240,13 @@ int main(int argc, char **argv)
             "gespeichert %lu, verworfen %lu, CSV-Zeilen %d", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped, count_rows("/EVENTS.CSV"));
       char rel[64]; csv_file(0, rel, sizeof rel);
       CHECK(strstr(rel, ".WAV") != NULL && file_size(rel) > 654 && g_nc.io_errors == 0, "WAV des Tuergeraeusches vorhanden (%ld Bytes), Schreibfehler %lu", file_size(rel), (unsigned long)g_nc.io_errors); }
+
+    printf("T10: Klatschen bei 5 s, jeder SD-Schreibzugriff erzeugt 66 dB(A) Schaltrauschen (60 s Simulation)\n");
+    { static burst_t b[1]; b[0] = (burst_t){ 5.0, 0.8, 78.0, 0.10, 0, 0 }; sim_t o = { 60, 0, 0, NULL, 0 };
+      g_inject = 1; run_sim("t10", &o, b, 1, B, 33.0, 0.0); g_inject = 0;
+      char act[32] = "99"; csv_col(0, 4, act, sizeof act);
+      CHECK(g_nc.events_total == 1, "genau 1 Ereignis, keine Selbstausloesung durch Schreibrauschen (erkannt: %lu)", (unsigned long)g_nc.events_total);
+      CHECK(atof(act) < 4.0, "Ereignis endet rechtzeitig (aktive Dauer %s s)", act); }
 
     printf("\n%s (%d Fehler)\n", failures ? "FEHLGESCHLAGEN" : "ALLE GRENZFALLTESTS BESTANDEN", failures);
     return failures != 0;

@@ -63,6 +63,7 @@ typedef struct {
 typedef struct { float meansq; float peak; uint32_t pos; } nc_frame_t;
 
 #define NC_DAY_MAX 300
+#define NC_BLK     8      /* Sperrbereiche (SD-Zugriffe), die noch nicht ausgewertet wurden */
 
 /* Ereignis im Tagesdiagramm */
 typedef struct { uint32_t sod; int16_t lafmax10, bg10; uint8_t cls, dist; } nc_dayev_t;
@@ -133,6 +134,7 @@ typedef struct {
     uint32_t    holdoff;            /* Frames Pause nach SD-Fehler */
     uint32_t    io_errors;          /* fehlgeschlagene Schreibzugriffe auf die WAV-Datei */
     uint32_t    events_dropped;     /* verworfene SONST-Ereignisse (keep_sonst = 0) */
+    uint32_t    blk_from[NC_BLK], blk_to[NC_BLK], blk_n;   /* Samplebereiche waehrend SD-Zugriffen: Stoergeraeusche, nicht auswerten */
     float       ev_limit;           /* Grenzwert des laufenden Ereignisses */
     uint8_t     ev_dist, ev_night;  /* Stoerung? / Nachtzeit? */
     nc_dayev_t  day[NC_DAY_MAX];    /* Arbeitsspeicher fuer das Tagesdiagramm */
