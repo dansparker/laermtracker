@@ -625,7 +625,6 @@ static void finish_event(nc_t *n)
     uint32_t p0 = n->wr;
     finish_event_inner(n);
     blank_add(n, p0);
-    n->holdoff = 150;                                         /* 1,5 s Pause: Nachklingen / Schaltrauschen nicht als neues Ereignis werten */
 }
 
 static void frame_consume(nc_t *n, const nc_frame_t *fr)
