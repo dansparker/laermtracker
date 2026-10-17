@@ -281,7 +281,7 @@ int main(int argc, char **argv)
                "  --device N|NAME         Geraet waehlen (Windows: Nummer, Linux: ALSA-Name, z.B. plughw:1,0; Standard: Systemstandard)\n"
                "  --sens dBFS             Mikrofonempfindlichkeit bei 94 dB SPL (Standard -26 = ICS-43434); mit --calibrate bestimmen\n"
                "  --calibrate             Empfindlichkeit mit 94-dB-Kalibrator messen\n"
-               "  --out DIR               Ausgabeordner auf der Festplatte (Standard: Benutzerordner\Laermtracker)\n"
+               "  --out DIR               Ausgabeordner auf der Festplatte (Standard: Benutzerordner/Laermtracker)\n"
                "  --rate HZ               Abtastrate (Standard 48000, Vielfaches von 100)\n"
                "  --wav-in DATEI [--start \"JJJJ-MM-TT hh:mm:ss\"]   statt Mikrofon eine WAV-Datei analysieren\n"
                "  --trig-min dBA (50)  --trig-delta dB (12)  --pre-ms (1000)  --post-ms (3000)  --max-ms (60000)\n"

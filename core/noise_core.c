@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PI_F 3.14159265358979323846
@@ -835,12 +836,12 @@ static void recal_line(nc_t *n, const char *line, float delta, nc_recal_t *res, 
     char day[8] = {0}; snprintf(day, sizeof day, "%.6s", fld[13] + 1);
     int seen = 0;
     for (uint32_t i = 0; i < *nd; i++) if (!strcmp(days[i], day)) seen = 1;
-    char tagnew[32]; snprintf(tagnew, sizeof tagnew, "/%s/TAG.NEU", day);
-    if (!seen) { if (*nd < 400) snprintf(days[(*nd)++], 8, "%s", day); n->io.remove(n->io.user, tagnew); }
+    char tagnew[32]; snprintf(tagnew, sizeof tagnew, "/%.6s/TAG.NEU", day);
+    if (!seen) { if (*nd < 400) snprintf(days[(*nd)++], 8, "%.6s", day); n->io.remove(n->io.user, tagnew); }
     csv_append(n, "/EVENTS.NEU", row);
     csv_append(n, tagnew, row);
     res->rows++;
-    char wavp[40], svgp[40]; snprintf(wavp, sizeof wavp, "%s", fld[13]); snprintf(svgp, sizeof svgp, "%s", fld[13]);
+    char wavp[48], svgp[48]; snprintf(wavp, sizeof wavp, "%.40s", fld[13]); snprintf(svgp, sizeof svgp, "%.40s", fld[13]);
     size_t l = strlen(svgp); memcpy(svgp + l - 3, "SVG", 3);
     n->ev_night = !strcmp(fld[2], "NACHT"); n->ev_limit = lim; n->ev_dist = (uint8_t)dist;
     n->ev_bg = bg; n->ev_lpeak = lpk; n->ev_lafmax = lafmax;
@@ -870,9 +871,9 @@ int nc_recalibrate(nc_t *n, float delta_db, nc_recal_t *res)
     if (res->rows == 0) { n->io.remove(n->io.user, "/EVENTS.NEU"); return -2; }
     if (copy_file(n, "/EVENTS.NEU", "/EVENTS.CSV") == 0) n->io.remove(n->io.user, "/EVENTS.NEU");
     for (uint32_t i = 0; i < nd; i++) {                                    /* Tagesdateien ersetzen, Tagesdiagramm neu */
-        char src[32], dst[32]; snprintf(src, sizeof src, "/%s/TAG.NEU", days[i]); snprintf(dst, sizeof dst, "/%s/TAG.CSV", days[i]);
+        char src[32], dst[32]; snprintf(src, sizeof src, "/%.6s/TAG.NEU", days[i]); snprintf(dst, sizeof dst, "/%.6s/TAG.CSV", days[i]);
         if (copy_file(n, src, dst) == 0) n->io.remove(n->io.user, src);
-        snprintf(n->dir, sizeof n->dir, "%s", days[i]);
+        snprintf(n->dir, sizeof n->dir, "%.6s", days[i]);
         write_day_svg(n);
         res->days++;
     }
