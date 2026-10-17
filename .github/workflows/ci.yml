@@ -34,12 +34,15 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq gcc-arm-none-eabi libnewlib-arm-none-eabi
       - name: Abhaengigkeiten holen (HAL, CMSIS, FatFs)
         run: sh fw/fetch_deps.sh
-      - name: Firmware bauen
-        run: make -C fw
+      - name: Firmware bauen (linker und rechter I2S-Slot)
+        run: |
+          make -C fw
+          make -C fw MIC_CHANNEL=1 BUILD=build_r
+          mkdir -p dist
+          cp fw/build/laermtracker.bin dist/laermtracker.bin
+          cp fw/build_r/laermtracker.bin dist/laermtracker_rechts.bin
+          cp fw/build/laermtracker.elf fw/build/laermtracker.map dist/
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: |
-            fw/build/laermtracker.bin
-            fw/build/laermtracker.elf
-            fw/build/laermtracker.map
+          path: dist/

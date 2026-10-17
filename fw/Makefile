@@ -5,6 +5,8 @@ CC := $(PREFIX)gcc
 SIZE := $(PREFIX)size
 OBJCOPY := $(PREFIX)objcopy
 HSE_VALUE ?= 8000000U
+MIC_CHANNEL ?= 0          # 0 = linker I2S-Slot (SEL an GND), 1 = rechter Slot (SEL an 3V3)
+BUILD ?= build
 
 D := deps
 HAL := $(D)/hal
@@ -20,25 +22,25 @@ ASMS := $(D)/cmsis_device/Source/Templates/gcc/startup_stm32f446xx.s
 
 CPU := -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 INC := -IInc -I../core -I$(FF) -I$(HAL)/Inc -I$(D)/cmsis_device/Include -I$(D)/cmsis_core/CMSIS/Core/Include
-DEF := -DUSE_HAL_DRIVER -DSTM32F446xx -DHSE_VALUE=$(HSE_VALUE)
+DEF := -DUSE_HAL_DRIVER -DSTM32F446xx -DHSE_VALUE=$(HSE_VALUE) -DMIC_CHANNEL=$(MIC_CHANNEL)u
 CFLAGS := $(CPU) $(DEF) $(INC) -Os -g -std=gnu11 -Wall -ffunction-sections -fdata-sections
-LDFLAGS := $(CPU) -TSTM32F446RETx_FLASH.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=build/laermtracker.map -lm
+LDFLAGS := $(CPU) -TSTM32F446RETx_FLASH.ld --specs=nano.specs --specs=nosys.specs -Wl,--gc-sections -Wl,-Map=$(BUILD)/laermtracker.map -lm
 
-OBJS := $(SRCS:%.c=build/%.o) $(ASMS:%.s=build/%.o)
+OBJS := $(SRCS:%.c=$(BUILD)/%.o) $(ASMS:%.s=$(BUILD)/%.o)
 
-all: build/laermtracker.bin
-	$(SIZE) build/laermtracker.elf
+all: $(BUILD)/laermtracker.bin
+	$(SIZE) $(BUILD)/laermtracker.elf
 
-build/laermtracker.elf: $(OBJS)
+$(BUILD)/laermtracker.elf: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) -o $@
-build/laermtracker.bin: build/laermtracker.elf
+$(BUILD)/laermtracker.bin: $(BUILD)/laermtracker.elf
 	$(OBJCOPY) -O binary $< $@
-build/%.o: %.c
+$(BUILD)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
-build/%.o: %.s
+$(BUILD)/%.o: %.s
 	@mkdir -p $(dir $@)
 	$(CC) $(CPU) -x assembler-with-cpp -c $< -o $@
 clean:
-	rm -rf build
+	rm -rf $(BUILD)
 .PHONY: all clean

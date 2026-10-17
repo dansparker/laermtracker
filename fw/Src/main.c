@@ -10,6 +10,7 @@
 #include "dbg.h"
 #include <stdio.h>
 #include <stdarg.h>
+#include <math.h>
 #include <string.h>
 
 SD_HandleTypeDef hsd;                         /* von diskio.c benutzt */
@@ -216,6 +217,32 @@ static void push_half(const uint16_t *p)
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *h) { (void)h; push_half(dma_buf); }
 void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *h)     { (void)h; push_half(dma_buf + DMA_WORDS); }
 
+/* Kanaltest: zeigt im Log, in welchem I2S-Slot (links/rechts) das Mikrofon wirklich Daten liefert.
+ * Der Slot ohne Mikrofon ist hochohmig und liest Rauschen/Brummen. Nutzkanal: kleiner, stabiler Pegel, der auf Klatschen reagiert. */
+static void diag_channels(void)
+{
+    HAL_Delay(300);
+    for (int rep = 0; rep < 3; rep++) {
+        int64_t sum[2] = {0, 0}, sq[2] = {0, 0}; uint32_t lo[2] = {0, 0}, n = 0;
+        for (uint32_t w = 0; w + 1 < DMA_WORDS; w += 2, n++)
+            for (uint32_t c = 0; c < 2; c++) {
+                uint32_t k = (w + c) * 2u;
+                int32_t v = (int16_t)dma_buf[k];
+                sum[c] += v; sq[c] += (int64_t)v * v; lo[c] += (dma_buf[k + 1] & 0xFFu) != 0;
+            }
+        long mean[2]; unsigned long rms[2], lop[2];
+        for (int c = 0; c < 2; c++) {
+            mean[c] = (long)(sum[c] / n);
+            float var = (float)(sq[c] / n - (int64_t)mean[c] * mean[c]);
+            rms[c] = (unsigned long)sqrtf(var < 0 ? 0 : var);
+            lop[c] = lo[c] * 100u / n;
+        }
+        log_line("Kanaltest %d: links mean=%ld rms=%lu low!=0 %lu%% | rechts mean=%ld rms=%lu low!=0 %lu%% | genutzt: %s",
+                 rep, mean[0], rms[0], lop[0], mean[1], rms[1], lop[1], MIC_CHANNEL ? "rechts" : "links");
+        HAL_Delay(200);
+    }
+}
+
 /* ------------------------------------------------------------------ main */
 int main(void)
 {
@@ -267,6 +294,7 @@ int main(void)
     if (HAL_I2S_Init(&hi2s2) != HAL_OK) fatal();
     if (HAL_I2S_Receive_DMA(&hi2s2, dma_buf, DMA_WORDS) != HAL_OK) fatal();
 
+    diag_channels();
     for (int i = 0; i < 3; i++) { led(1); HAL_Delay(80); led(0); HAL_Delay(120); }   /* bereit */
     IWDG->KR = 0x5555; IWDG->PR = 4; IWDG->RLR = 4000;   /* Watchdog: LSI/64, ca. 8 s */
     while (IWDG->SR) {}
