@@ -5,7 +5,8 @@ CC := $(PREFIX)gcc
 SIZE := $(PREFIX)size
 OBJCOPY := $(PREFIX)objcopy
 HSE_VALUE ?= 8000000U
-MIC_CHANNEL ?= 0          # 0 = linker I2S-Slot (SEL an GND), 1 = rechter Slot (SEL an 3V3)
+# MIC_CHANNEL: 0 = linker I2S-Slot (SEL an GND), 1 = rechter Slot (SEL an 3V3)
+MIC_CHANNEL ?= 0
 BUILD ?= build
 
 D := deps
