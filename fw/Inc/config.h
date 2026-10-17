@@ -17,7 +17,7 @@
 #define PRE_MS             1000u
 #define POST_MS            3000u
 #define SLAM_LAFMAX_DBA    75.0f
-#define WAV_HPF_HZ         25.0f    /* Hochpass auf die gespeicherte WAV (Mikrofon liefert unter ca. 60 Hz ohnehin nichts); 0 = Rohdaten */
+#define WAV_HPF_HZ         0.0f     /* >0: Hochpass (Hz) auf die gespeicherte WAV (entfernt DC und SD-Schreibwummern); 0 = Rohdaten */
 #define KEEP_SONST         0        /* 0 = nur impulshafte Ereignisse (Tuer/Knall) behalten, Stimmen/Brummen verwerfen */
 
 /* Stoerungskriterium: LAFmax >= Grenzwert (Innenraum am Mikrofon), Zeiten lokal */
