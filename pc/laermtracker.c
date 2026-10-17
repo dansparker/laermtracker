@@ -5,6 +5,7 @@
  *   laermtracker --list                         Aufnahmegeraete anzeigen
  *   laermtracker --calibrate --device 1         Mikrofonempfindlichkeit mit 94-dB-Kalibrator (1 kHz) bestimmen
  *   laermtracker --device 1 --sens -32 --out D:\laerm      Ueberwachung starten (Strg+C beendet)
+ *   (Linux: --device NAME statt Nummer, z.B. default oder plughw:1,0; Aufnahme ueber ALSA, Build mit -DHAVE_ALSA -lasound)
  *   laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out out   WAV-Datei analysieren
  *
  * Ausgabe wie auf der SD-Karte: <out>\YYMMDD\HHMMSS.WAV/.SVG, <out>\YYMMDD\TAG.CSV/.SVG, <out>\EVENTS.CSV
@@ -16,16 +17,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #ifdef _WIN32
 #include <windows.h>
 #include <mmsystem.h>
 #include <direct.h>
 #define MKDIR(p) _mkdir(p)
+#define PSEP "\\"
 #else
+#define PSEP "/"
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #define MKDIR(p) mkdir(p, 0777)
+#ifdef HAVE_ALSA
+#include <alsa/asoundlib.h>
+#endif
 #endif
 
 static char g_out[260] = "laermtracker-daten";
@@ -84,7 +91,7 @@ static void report_events(uint32_t *seen_total, uint32_t *seen_dropped)
 {
     if (g_nc.events_total != *seen_total) {
         *seen_total = g_nc.events_total;
-        printf("\n[Ereignis gespeichert] %s\\%s.WAV\n", g_nc.dir, g_nc.base); fflush(stdout);
+        printf("\n[Ereignis gespeichert] %s" PSEP "%s.WAV\n", g_nc.dir, g_nc.base); fflush(stdout);
     }
     if (g_nc.events_dropped != *seen_dropped) {
         *seen_dropped = g_nc.events_dropped;
@@ -200,6 +207,69 @@ static int run_mic(int dev, int calibrate)
 }
 #endif
 
+#if !defined(_WIN32) && defined(HAVE_ALSA)
+/* ---------------------------------------------------------------- Mikrofon (ALSA, Linux) */
+static void on_sig(int s) { (void)s; g_stop = 1; }
+
+static void list_alsa(void)
+{
+    void **hints;
+    printf("Aufnahmegeraete (--device NAME, z.B. default oder plughw:1,0):\n");
+    if (snd_device_name_hint(-1, "pcm", &hints) < 0) return;
+    for (void **h = hints; *h; h++) {
+        char *name = snd_device_name_get_hint(*h, "NAME"), *io = snd_device_name_get_hint(*h, "IOID"), *desc = snd_device_name_get_hint(*h, "DESC");
+        if (name && (!io || !strcmp(io, "Input"))) {
+            printf("  %s", name);
+            if (desc) { for (char *c = desc; *c; c++) if (*c == '\n') *c = ' '; printf("   (%s)", desc); }
+            printf("\n");
+        }
+        free(name); free(io); free(desc);
+    }
+    snd_device_name_free_hint(hints);
+}
+
+static int run_alsa(const char *dev, int calibrate)
+{
+    snd_pcm_t *pcm;
+    if (snd_pcm_open(&pcm, dev, SND_PCM_STREAM_CAPTURE, 0) < 0 ||
+        snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED, 1, g_fs, 1, 500000) < 0) {
+        fprintf(stderr, "Mikrofon '%s' kann nicht geoeffnet werden. Mit --list Geraete pruefen, ggf. --rate 44100.\n", dev);
+        return 1;
+    }
+    signal(SIGINT, on_sig); signal(SIGTERM, on_sig);
+    uint32_t blen = g_fs / 10; int16_t *buf = malloc(blen * 2);
+    printf(calibrate ? "Kalibrierung: Kalibrator (94 dB, 1 kHz) ans Mikrofon halten ... 6 s\n"
+                     : "Ueberwachung laeuft (Strg+C beendet). Ausgabe: %s\n", g_out);
+    uint32_t seen_t = 0, seen_d = 0; uint64_t total = 0, tick = 0, ncal = 0; double sum = 0, sumsq = 0;
+    while (!g_stop) {
+        snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, blen);
+        if (n < 0) { snd_pcm_recover(pcm, (int)n, 1); continue; }           /* Ueberlauf (xrun) o. ae. */
+        if (calibrate) {
+            if (total >= g_fs) for (snd_pcm_sframes_t i = 0; i < n; i++) { sum += buf[i]; sumsq += (double)buf[i] * buf[i]; ncal++; }
+            total += (uint64_t)n;
+            if (total >= (uint64_t)g_fs * 6) break;
+        } else {
+            feed(buf, (uint32_t)n);
+            if (++tick % 10 == 0) {
+                report_events(&seen_t, &seen_d);
+                printf("\rLAF %5.1f dB(A)  Hintergrund %5.1f dB(A)  %s   ", level_laf(), g_nc.bg_db, g_nc.state == NC_ACTIVE ? "[AUFNAHME]" : "          ");
+                fflush(stdout);
+            }
+        }
+    }
+    snd_pcm_close(pcm); free(buf);
+    if (calibrate) {
+        if (!ncal) { fprintf(stderr, "keine Daten\n"); return 1; }
+        double m = sum / ncal, rms = sqrt(sumsq / ncal - m * m), sens = 20.0 * log10(rms * 1.41421356 / 32768.0);
+        printf("Effektivwert %.1f Counts -> Empfindlichkeit %.1f dBFS bei 94 dB SPL\nStarten mit:  --sens %.1f\n", rms, sens, sens);
+        return 0;
+    }
+    nc_flush(&g_nc);
+    printf("\nBeendet. Gespeicherte Ereignisse: %lu\n", (unsigned long)g_nc.events_total);
+    return 0;
+}
+#endif
+
 /* ---------------------------------------------------------------- main */
 int main(int argc, char **argv)
 {
@@ -208,7 +278,7 @@ int main(int argc, char **argv)
     if (flag("--help") || flag("-h") || argc == 1) {
         printf("Laermtracker (Windows, USB-Mikrofon)\n"
                "  --list                  Aufnahmegeraete anzeigen\n"
-               "  --device N              Geraet waehlen (Standard: Windows-Standardmikrofon)\n"
+               "  --device N|NAME         Geraet waehlen (Windows: Nummer, Linux: ALSA-Name, z.B. plughw:1,0; Standard: Systemstandard)\n"
                "  --sens dBFS             Mikrofonempfindlichkeit bei 94 dB SPL (Standard -26 = ICS-43434); mit --calibrate bestimmen\n"
                "  --calibrate             Empfindlichkeit mit 94-dB-Kalibrator messen\n"
                "  --out DIR               Ausgabeordner auf der Festplatte (Standard: Benutzerordner\Laermtracker)\n"
@@ -223,8 +293,11 @@ int main(int argc, char **argv)
     }
 #ifdef _WIN32
     if (flag("--list")) { list_devices(); return 0; }
+#elif defined(HAVE_ALSA)
+    if (flag("--list")) { list_alsa(); return 0; }
 #endif
-    { const char *up = getenv("USERPROFILE"); if (up && strlen(up) < 200) snprintf(g_out, sizeof g_out, "%s\Laermtracker", up); }   /* Standard: Festplatte, Benutzerordner */
+    { const char *up = getenv("USERPROFILE"); if (!up) up = getenv("HOME");                       /* Standard: Festplatte, Benutzerordner */
+      if (up && strlen(up) < 200) snprintf(g_out, sizeof g_out, "%s" PSEP "Laermtracker", up); }
     if (opt("--out")) snprintf(g_out, sizeof g_out, "%s", opt("--out"));
     g_fs = (uint32_t)optd("--rate", 48000);
     if (g_fs < 8000 || g_fs % 100) { fprintf(stderr, "--rate muss >= 8000 und ein Vielfaches von 100 sein\n"); return 1; }
@@ -279,8 +352,12 @@ int main(int argc, char **argv)
     int rc = run_mic(flag("--device") || opt("--device") ? (int)optd("--device", -1) : -1, flag("--calibrate"));
     free(ring);
     return rc;
+#elif defined(HAVE_ALSA)
+    int rc = run_alsa(opt("--device") ? opt("--device") : "default", flag("--calibrate"));
+    free(ring);
+    return rc;
 #else
-    fprintf(stderr, "Mikrofoneingang gibt es nur unter Windows; hier nur --wav-in.\n");
+    fprintf(stderr, "Diese Programmversion wurde ohne Mikrofonunterstuetzung gebaut (Linux: mit -DHAVE_ALSA -lasound bauen); hier nur --wav-in.\n");
     free(ring);
     return 1;
 #endif

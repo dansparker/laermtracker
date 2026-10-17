@@ -50,13 +50,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: PC-Version bauen (WAV-Eingabe)
-        run: gcc -std=gnu99 -O2 -Wall -Wextra -o laermtracker pc/laermtracker.c core/noise_core.c -lm
+      - name: ALSA-Entwicklungsdateien
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libasound2-dev
+      - name: PC-Version bauen (mit ALSA-Mikrofon)
+        run: gcc -std=gnu99 -O2 -Wall -Wextra -DHAVE_ALSA -o laermtracker pc/laermtracker.c core/noise_core.c -lasound -lm
       - name: Testaufnahme erzeugen und analysieren
         run: |
           python3 tests/make_test_wav.py test_in.wav
           ./laermtracker --wav-in test_in.wav --start "2026-10-03 21:59:30" --out out_pc
           python3 tests/check_pc.py out_pc
+          ./laermtracker --help | head -3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laermtracker-linux-x86_64
+          path: laermtracker
   pc-windows:
     runs-on: windows-latest
     steps:
