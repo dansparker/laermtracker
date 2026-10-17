@@ -78,7 +78,24 @@ jobs:
           ./laermtracker.exe --wav-in test_in.wav --start "2026-10-03 21:59:30" --out out_pc
           python tests/check_pc.py out_pc
           ./laermtracker.exe --list
+      - name: GUI bauen (MinGW, statisch, mit Manifest)
+        shell: bash
+        run: |
+          windres pc/gui.rc -O coff -o gui_rc.o
+          gcc -std=gnu99 -O2 -Wall -Wextra -mwindows -static -o laermtracker-gui.exe pc/gui.c core/noise_core.c gui_rc.o -lwinmm -lcomctl32 -lshell32 -lole32 -lgdi32 -luser32 -lm
+      - name: GUI-Selbsttest (WAV statt Mikrofon, prueft Thread, Kern und Ereignisliste)
+        shell: bash
+        run: |
+          python tests/make_test_wav.py test_in.wav
+          mkdir -p out_gui
+          ./laermtracker-gui.exe --selftest test_in.wav --start "2026-10-03 21:59:30" --out "$PWD/out_gui"
+          echo "Exitcode $?"
+          cat out_gui/selftest_result.txt
+          grep -q "^OK" out_gui/selftest_result.txt
+          python tests/check_pc.py out_gui
       - uses: actions/upload-artifact@v4
         with:
           name: laermtracker-windows
-          path: laermtracker.exe
+          path: |
+            laermtracker.exe
+            laermtracker-gui.exe
