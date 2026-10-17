@@ -105,6 +105,10 @@ laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe  
 - **Windows:** fertige `laermtracker.exe` als CI-Artefakt `laermtracker-windows` (kein Installer nötig), oder mit
   MinGW selbst bauen: `make -C pc windows`. Eingang über WinMM (`--device N`).
 - **Linux:** `sudo apt install libasound2-dev && make -C pc`, Eingang über ALSA (`--device default` oder `plughw:1,0`).
+- **Nachträglich korrigieren (ohne Kalibrator):** Handy-Schallpegelmesser neben das Mikrofon legen, gleichmäßiges Rauschen abspielen und den Unterschied
+  im Feld „Korrektur [dB]“ eintragen. „Vorhandene Aufnahmen umrechnen …“ (oder `laermtracker --recalibrate dB --out ORDNER`) rechnet alle bisherigen
+  Ergebnisse um: CSV, Ereignis- und Tagesdiagramme, Störungen und Knall-Einstufung werden neu bewertet. Das Original bleibt als `EVENTS_ALT.CSV`,
+  jede Anwendung steht in `KORREKTUR.LOG`. Nur einmal je Korrektur anwenden.
 - **Wichtig:** Ein USB-Mikrofon hat eine unbekannte Empfindlichkeit. Ohne `--calibrate`/`--sens` sind die dB-Werte nur Schätzungen.
   Automatische Verstärkung (AGC) und „Klangverbesserungen“ in den Systemeinstellungen abschalten, sonst sind die Pegel unbrauchbar.
 - Alle Schwellen (`--trig-min`, `--trig-delta`, `--post-ms`, `--lim-night`, …) stehen in `laermtracker --help`.
