@@ -166,7 +166,7 @@ static void blank_add(nc_t *n, uint32_t p0)
 {
     uint32_t p1 = n->wr;
     if (p1 == p0) return;
-    uint32_t from = psub(n, p0, n->frame_len), to = (uint32_t)(((uint64_t)p1 + 2u * n->frame_len) % n->M);
+    uint32_t from = p0, to = (uint32_t)(((uint64_t)p1 + n->frame_len) % n->M);     /* Frames, die den Zugriff beruehren, + 1 Frame Nachlauf */
     if (n->blk_n && pdist(n, from, n->blk_to[n->blk_n - 1]) < n->M / 2) { n->blk_to[n->blk_n - 1] = to; return; }   /* ueberlappt: erweitern */
     if (n->blk_n == NC_BLK) { n->blk_to[NC_BLK - 1] = to; return; }
     n->blk_from[n->blk_n] = from; n->blk_to[n->blk_n] = to; n->blk_n++;
@@ -194,6 +194,7 @@ static void drain(nc_t *n, int all)
         uint32_t lost = pdist(n, n->rd, wr) - n->ring_len;
         n->rd = (uint32_t)(((uint64_t)n->rd + lost) % n->M); n->overruns += lost;
     }
+    if (!all && pdist(n, n->rd, wr) < NC_DRAIN_MIN) return;
     for (;;) {
         uint32_t avail = pdist(n, n->rd, wr);
         if (avail < (all ? 1u : NC_CHUNK_SAMPLES)) break;
@@ -558,18 +559,20 @@ static float end_threshold(const nc_t *n)
     return a > b ? a : b;
 }
 
-static void event_account(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t idx)
+static void event_account(nc_t *n, float L, float laf, float laf_act, float lpk, double meansq, uint32_t idx, int blank)
 {
     n->ev_sumA += meansq; n->ev_n++;
     float thr = end_threshold(n);
-    if (laf >= thr) n->ev_last_active = idx;                  /* Ende-Timer: LAF (125 ms) statt 10-ms-Pegel (Zufallsspitzen) */
-    if (L >= thr) {                                           /* Dauer/LAeq: tatsaechliche Schallenergie, ohne LAF-Nachklingen */
-        n->ev_last_L = idx;
-        n->ev_sumA_snap = n->ev_sumA; n->ev_n_snap = n->ev_n;
+    if (!blank) {                                             /* gesperrte Frames (SD-Schaltrauschen) zaehlen nicht als Aktivitaet */
+        if (laf_act >= thr) n->ev_last_active = idx;          /* Ende-Timer: LAF (125 ms) statt 10-ms-Pegel (Zufallsspitzen) */
+        if (L >= thr) {                                       /* Dauer/LAeq: tatsaechliche Schallenergie, ohne LAF-Nachklingen */
+            n->ev_last_L = idx;
+            n->ev_sumA_snap = n->ev_sumA; n->ev_n_snap = n->ev_n;
+        }
+        if (L - n->prev_db > n->ev_rise) n->ev_rise = L - n->prev_db;
     }
     if (laf > n->ev_lafmax) { n->ev_lafmax = laf; n->ev_lafmax_frame = idx; }
     if (lpk > n->ev_lpeak) n->ev_lpeak = lpk;
-    if (L - n->prev_db > n->ev_rise) n->ev_rise = L - n->prev_db;
 }
 
 static void start_event_inner(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
@@ -607,7 +610,7 @@ static void start_event_inner(nc_t *n, float L, float laf, float lpk, double mea
     n->ev_sumA = 0; n->ev_n = 0; n->ev_sumA_snap = 0; n->ev_n_snap = 0;
     n->ev_lafmax = -999; n->ev_lpeak = -999; n->ev_rise = -999;
     n->ev_bg = n->bg_db;
-    event_account(n, L, laf, lpk, meansq, pre);
+    event_account(n, L, laf, laf, lpk, meansq, pre, 0);
 }
 
 static void start_event(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t endpos)
@@ -636,9 +639,10 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
     float lpk = 20.0f * log10f(pk / n->ref_peak) + cal;
 
     const float alpha = 1.0f - expf(-0.010f / 0.125f);     /* Fast: tau = 125 ms */
-    if (n->frames_seen == 0) n->laf_energy = (float)meansq;
-    else if (!blank) n->laf_energy += alpha * ((float)meansq - n->laf_energy);
+    if (n->frames_seen == 0) n->laf_energy = n->lafc_energy = (float)meansq;
+    else { n->laf_energy += alpha * ((float)meansq - n->laf_energy); if (!blank) n->lafc_energy += alpha * ((float)meansq - n->lafc_energy); }
     float laf = 10.0f * log10f(n->laf_energy / n->ref_rms2) + cal;
+    float laf_act = 10.0f * log10f(n->lafc_energy / n->ref_rms2) + cal;
     float lafc = laf < 0 ? 0 : laf;
     n->hist[n->hist_n % NC_HIST_FRAMES] = (uint16_t)(lafc * 10.0f + 0.5f);
     n->hist_n++;
@@ -663,7 +667,7 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
     } else {
         uint32_t idx = n->ev_frames++;
         plot_add(n, (int16_t)n->hist[(n->hist_n - 1) % NC_HIST_FRAMES]);
-        if (!blank) event_account(n, L, laf, lpk, meansq, idx);
+        event_account(n, L, laf, laf_act, lpk, meansq, idx, blank);
         drain(n, 0);
         if (idx - n->ev_last_active >= n->ev_post_frames || n->ev_frames >= n->ev_max_frames)
             finish_event(n);

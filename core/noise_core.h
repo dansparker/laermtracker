@@ -56,6 +56,7 @@ typedef struct {
 
 #define NC_MAX_PLOT_BINS   720          /* 100-ms-Bins => 72 s */
 #define NC_CHUNK_SAMPLES   1024
+#define NC_DRAIN_MIN       8192   /* erst ab so vielen Samples auf die SD schreiben (seltener = weniger Schaltrauschen) */
 #define NC_HIST_FRAMES     256
 
 #define NC_FQ_LEN          128
@@ -102,7 +103,8 @@ typedef struct {
 
     float       bg_db;              /* Hintergrundpegel */
     uint32_t    frames_seen;
-    float       laf_energy;         /* Fast-Bewertung (125 ms) */
+    float       laf_energy;         /* Fast-Bewertung (125 ms), alle Frames */
+    float       lafc_energy;        /* dito ohne gesperrte Frames (fuer Ende-Timer) */
     float       prev_db;
     uint16_t    hist[NC_HIST_FRAMES]; /* LAF je Frame, 0.1 dB, fuer Vorlauf-Plot */
     uint32_t    hist_n;
