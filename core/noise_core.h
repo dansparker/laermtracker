@@ -161,6 +161,10 @@ void nc_process(nc_t *n, const int32_t *s24, uint32_t count);
 /* laufendes Ereignis sauber abschliessen (z.B. vor Abschalten) */
 void nc_flush(nc_t *n);
 
+/* Nachtraegliche Pegelkorrektur der Ergebnisse im Ausgabeordner (EVENTS.CSV, TAG.CSV, Plots) um delta_db */
+typedef struct { uint32_t rows, svgs, days, skipped; } nc_recal_t;
+int nc_recalibrate(nc_t *n, float delta_db, nc_recal_t *res);   /* 0 = ok, -1 = keine EVENTS.CSV, -2 = keine Zeilen */
+
 /* Hilfen (auch fuer Tests) */
 float nc_a_weight_response_db(float f, float fs);   /* Betrag des digitalen Filters inkl. Normierung */
 int64_t nc_ms_from_civil(int y, int mo, int d, int h, int mi, int s, int msec);

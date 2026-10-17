@@ -23,7 +23,7 @@
 #include <string.h>
 #include <wchar.h>
 
-enum { IDC_DEV = 100, IDC_SENS, IDC_CAL, IDC_OUT, IDC_BROWSE, IDC_OPEN, IDC_TRIGMIN, IDC_DELTA, IDC_POST, IDC_LIMN, IDC_LIMD,
+enum { IDC_DEV = 100, IDC_SENS, IDC_CAL, IDC_OUT, IDC_BROWSE, IDC_OPEN, IDC_KORR, IDC_RECAL, IDC_TRIGMIN, IDC_DELTA, IDC_POST, IDC_LIMN, IDC_LIMD,
        IDC_ONLYDOOR, IDC_START, IDC_STATUS, IDC_LIST, IDC_GRAPH, IDC_DAYPLOT, IDC_CSV, IDC_TIMER = 1 };
 #define WM_APP_EVENT (WM_APP + 1)     /* lParam: malloc'ierte letzte CSV-Zeile (UTF-16) */
 #define WM_APP_DONE  (WM_APP + 2)     /* Arbeits-Thread beendet */
@@ -33,7 +33,7 @@ enum { IDC_DEV = 100, IDC_SENS, IDC_CAL, IDC_OUT, IDC_BROWSE, IDC_OPEN, IDC_TRIG
 #define NBUF 20
 #define HIST_N 600                    /* 120 s bei 5 Werten/s */
 
-static HWND g_hwnd, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_start, g_status, g_list, g_graph, g_cal;
+static HWND g_korr, g_hwnd, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_start, g_status, g_list, g_graph, g_cal;
 static HFONT g_font;
 static nc_t g_nc;
 static char g_out[520];
@@ -91,7 +91,7 @@ static void ini_get(const wchar_t *key, const wchar_t *def, wchar_t *out, int n)
 static void ini_set(const wchar_t *key, const wchar_t *val) { wchar_t p[MAX_PATH]; ini_path(p); WritePrivateProfileStringW(L"laermtracker", key, val, p); }
 static void save_settings(void)
 {
-    wchar_t t[600]; const struct { const wchar_t *k; HWND h; } f[] = { { L"sens", g_sens }, { L"out", g_out_e }, { L"trigmin", g_trigmin }, { L"delta", g_delta },
+    wchar_t t[600]; const struct { const wchar_t *k; HWND h; } f[] = { { L"sens", g_sens }, { L"korr", g_korr }, { L"out", g_out_e }, { L"trigmin", g_trigmin }, { L"delta", g_delta },
         { L"post", g_post }, { L"limn", g_limn }, { L"limd", g_limd } };
     for (unsigned i = 0; i < sizeof f / sizeof *f; i++) { GetWindowTextW(f[i].h, t, 600); ini_set(f[i].k, t); }
     _snwprintf(t, 20, L"%d", (int)SendMessageW(g_dev, CB_GETCURSEL, 0, 0)); ini_set(L"device", t);
@@ -222,7 +222,7 @@ static void set_edit_d(HWND h, double v, int dec) { wchar_t t[64]; _snwprintf(t,
 
 static void set_controls_enabled(int running)
 {
-    HWND h[] = { g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_cal, GetDlgItem(g_hwnd, IDC_BROWSE) };
+    HWND h[] = { GetDlgItem(g_hwnd, IDC_RECAL), g_korr, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_cal, GetDlgItem(g_hwnd, IDC_BROWSE) };
     for (unsigned i = 0; i < sizeof h / sizeof *h; i++) EnableWindow(h[i], !running);
     SetWindowTextW(g_start, g_running && g_mode == 0 ? L"■ Stopp" : L"▶ Start");
     EnableWindow(g_start, !(running && g_mode != 0));
@@ -237,7 +237,7 @@ static int start_job(int mode)
     wchar_t w[600]; u2w(g_out, w, 600); SHCreateDirectoryExW(NULL, w, NULL);
     int sel = (int)SendMessageW(g_dev, CB_GETCURSEL, 0, 0); g_dev_index = sel - 1;     /* 0 = Standardgerät */
     double sens = edit_d(g_sens, NC_MIC_SENS_DBFS);
-    g_cal_db = (float)(-sens - 26.0);
+    g_cal_db = (float)(-sens - 26.0 + edit_d(g_korr, 0));        /* Korrektur wirkt wie eine feinere Kalibrierung */
     nc_config_t cfg; nc_default_config(&cfg);
     cfg.fs = g_fs; cfg.cal_offset_db = g_cal_db;
     cfg.trig_min_dba = (float)edit_d(g_trigmin, 50); cfg.trig_delta_db = (float)edit_d(g_delta, 12);
@@ -370,12 +370,14 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         g_font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
         NONCLIENTMETRICSW ncm = { sizeof ncm }; if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof ncm, &ncm, 0)) g_font = CreateFontIndirectW(&ncm.lfMessageFont);
         label(L"Mikrofon:", 10, 10, 70);
-        g_dev = mk(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 85, 8, 400, 200, IDC_DEV, 0);
-        label(L"Empfindlichkeit [dBFS bei 94 dB]:", 500, 10, 200); g_sens = edit(IDC_SENS, L"-26", 700, 8, 60);
-        g_cal = mk(L"BUTTON", L"Kalibrieren …", BS_PUSHBUTTON, 770, 7, 110, 24, IDC_CAL, 0);
-        label(L"Ausgabeordner:", 10, 42, 90); g_out_e = edit(IDC_OUT, L"", 105, 40, 515);
-        mk(L"BUTTON", L"…", BS_PUSHBUTTON, 625, 39, 30, 24, IDC_BROWSE, 0);
-        mk(L"BUTTON", L"Ordner öffnen", BS_PUSHBUTTON, 665, 39, 120, 24, IDC_OPEN, 0);
+        g_dev = mk(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL, 85, 8, 270, 200, IDC_DEV, 0);
+        label(L"Empfindlichkeit [dBFS @94 dB]:", 365, 10, 195); g_sens = edit(IDC_SENS, L"-26", 560, 8, 52);
+        label(L"Korrektur [dB]:", 622, 10, 95); g_korr = edit(IDC_KORR, L"0", 718, 8, 50);
+        g_cal = mk(L"BUTTON", L"Kalibrieren …", BS_PUSHBUTTON, 778, 7, 120, 24, IDC_CAL, 0);
+        label(L"Ausgabeordner:", 10, 42, 90); g_out_e = edit(IDC_OUT, L"", 105, 40, 395);
+        mk(L"BUTTON", L"…", BS_PUSHBUTTON, 505, 39, 30, 24, IDC_BROWSE, 0);
+        mk(L"BUTTON", L"Ordner öffnen", BS_PUSHBUTTON, 540, 39, 110, 24, IDC_OPEN, 0);
+        mk(L"BUTTON", L"Vorhandene Aufnahmen umrechnen …", BS_PUSHBUTTON, 660, 39, 238, 24, IDC_RECAL, 0);
         label(L"Auslösung ab [dB(A)]:", 10, 72, 130); g_trigmin = edit(IDC_TRIGMIN, L"50", 140, 70, 40);
         label(L"+ über Hintergrund [dB]:", 195, 72, 150); g_delta = edit(IDC_DELTA, L"12", 345, 70, 40);
         label(L"Nachlauf [s]:", 400, 72, 80); g_post = edit(IDC_POST, L"3", 480, 70, 40);
@@ -399,6 +401,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         if (SHGetFolderPathW(NULL, CSIDL_PROFILE, NULL, 0, def) == S_OK) wcscat(def, L"\\Laermtracker");
         ini_get(L"device", L"0", t, 20); SendMessageW(g_dev, CB_SETCURSEL, _wtoi(t) < (int)(n + 1) ? _wtoi(t) : 0, 0);
         ini_get(L"sens", L"-26", t, 60); SetWindowTextW(g_sens, t);
+        ini_get(L"korr", L"0", t, 60); SetWindowTextW(g_korr, t);
         ini_get(L"out", def, t, 600); SetWindowTextW(g_out_e, t);
         ini_get(L"trigmin", L"50", t, 60); SetWindowTextW(g_trigmin, t);
         ini_get(L"delta", L"12", t, 60); SetWindowTextW(g_delta, t);
@@ -433,6 +436,30 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (id) { wchar_t p[MAX_PATH]; if (SHGetPathFromIDListW(id, p)) SetWindowTextW(g_out_e, p); CoTaskMemFree(id); }
             return 0; }
         case IDC_OPEN: { wchar_t p[700]; GetWindowTextW(g_out_e, p, 700); ShellExecuteW(NULL, L"explore", p, NULL, NULL, SW_SHOWNORMAL); return 0; }
+        case IDC_RECAL: {
+            if (g_running) return 0;
+            double dl = edit_d(g_korr, 0);
+            if (fabs(dl) < 0.05) { MessageBoxW(h, L"Bitte im Feld „Korrektur [dB]“ den Wert eintragen, um den alle vorhandenen Pegel verschoben werden sollen "
+                                                  L"(z. B. +6 oder −3).", L"Laermtracker", MB_ICONINFORMATION); return 0; }
+            wchar_t t[900];
+            _snwprintf(t, 900, L"Alle vorhandenen Ereignisse im Ausgabeordner um %+.1f dB umrechnen?\n\nCSV-Dateien, Ereignis- und Tagesdiagramme werden neu erzeugt und die "
+                       L"Störungen neu bewertet. Das Original bleibt als EVENTS_ALT.CSV erhalten.\n\nNur einmal anwenden: Dieselbe Korrektur gilt danach auch für neue "
+                       L"Aufnahmen (das Feld bleibt stehen). Waren Aufnahmen schon mit diesem Wert aufgenommen, würde doppelt korrigiert.", dl);
+            if (MessageBoxW(h, t, L"Pegel nachträglich korrigieren", MB_YESNO | MB_ICONQUESTION) != IDYES) return 0;
+            wchar_t ow[600]; GetWindowTextW(g_out_e, ow, 600); w2u(ow, g_out, sizeof g_out);
+            SetCursor(LoadCursorW(NULL, IDC_WAIT));
+            static int16_t dummy[1024];
+            nc_config_t cfg; nc_default_config(&cfg); cfg.fs = g_fs;
+            nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
+            g_sim = 0; nc_init(&g_nc, &cfg, &io, dummy, 1024);
+            nc_recal_t r; int rc = nc_recalibrate(&g_nc, (float)dl, &r);
+            SetCursor(LoadCursorW(NULL, IDC_ARROW));
+            if (rc) MessageBoxW(h, rc == -1 ? L"Im Ausgabeordner wurde keine EVENTS.CSV gefunden." : L"In EVENTS.CSV stehen keine Ereignisse.", L"Laermtracker", MB_ICONWARNING);
+            else { _snwprintf(t, 900, L"Fertig: %lu Ereignisse umgerechnet, %lu Ereignisdiagramme und %lu Tagesdiagramme neu erzeugt.\nOriginal: EVENTS_ALT.CSV",
+                              (unsigned long)r.rows, (unsigned long)r.svgs, (unsigned long)r.days);
+                   MessageBoxW(h, t, L"Pegel nachträglich korrigieren", MB_ICONINFORMATION); }
+            refresh_status();
+            return 0; }
         case IDC_DAYPLOT: {
             SYSTEMTIME st; GetLocalTime(&st); wchar_t rel[64], base[700], p[800];
             _snwprintf(rel, 64, L"\\%02d%02d%02d\\TAG.SVG", st.wYear % 100, st.wMonth, st.wDay);

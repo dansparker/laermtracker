@@ -286,6 +286,7 @@ int main(int argc, char **argv)
                "  --wav-in DATEI [--start \"JJJJ-MM-TT hh:mm:ss\"]   statt Mikrofon eine WAV-Datei analysieren\n"
                "  --trig-min dBA (50)  --trig-delta dB (12)  --pre-ms (1000)  --post-ms (3000)  --max-ms (60000)\n"
                "  --slam dBA (75)  --night-start h (22)  --night-end h (6)  --lim-night dBA (42)  --lim-day dBA (55)\n"
+               "  --recalibrate dB        vorhandene Ergebnisse im --out-Ordner nachtraeglich um dB korrigieren (CSV, Plots, Stoerungen neu; Original: EVENTS_ALT.CSV)\n"
                "  --keep-sonst 0|1        nicht impulshafte Ereignisse (Stimmen, Brummen) behalten (Standard 1)\n"
                "Hinweis: Automatische Verstaerkung (AGC) und Klangverbesserungen des Mikrofons in den Windows-Soundeinstellungen\n"
                "abschalten, sonst sind die Pegel unbrauchbar.\n");
@@ -335,6 +336,15 @@ int main(int argc, char **argv)
     nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
     nc_init(&g_nc, &cfg, &io, ring, ring_len);
     MKDIR(g_out);
+
+    if (opt("--recalibrate")) {                                         /* vorhandene Ergebnisse um X dB umrechnen */
+        float dl = (float)optd("--recalibrate", 0.0);
+        nc_recal_t r; int rc = nc_recalibrate(&g_nc, dl, &r);
+        if (rc) fprintf(stderr, "%s\n", rc == -1 ? "Keine EVENTS.CSV im Ausgabeordner gefunden." : "Keine Ereignisse in EVENTS.CSV.");
+        else printf("Pegel um %+.1f dB korrigiert: %lu Ereignisse, %lu Ereignisplots, %lu Tagesdiagramme neu erzeugt. Original: EVENTS_ALT.CSV\n",
+                    dl, (unsigned long)r.rows, (unsigned long)r.svgs, (unsigned long)r.days);
+        free(ring); return rc ? 1 : 0;
+    }
 
     if (wavin) {
         printf("Analysiere %s (%u Hz, %.1f s), Empfindlichkeit %.1f dBFS@94 dB\n", wavin, (unsigned)g_fs, wav_n / (double)g_fs, sens);

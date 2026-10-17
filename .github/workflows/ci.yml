@@ -60,6 +60,12 @@ jobs:
           ./laermtracker --wav-in test_in.wav --start "2026-10-03 21:59:30" --out out_pc
           python3 tests/check_pc.py out_pc
           ./laermtracker --help | head -3
+      - name: Nachtraegliche Pegelkorrektur testen (+6 dB, danach -40 dB)
+        run: |
+          ./laermtracker --recalibrate 6 --out out_pc
+          python3 tests/check_recal.py out_pc 6
+          ./laermtracker --recalibrate -40 --out out_pc
+          python3 tests/check_recal.py out_pc -40
       - uses: actions/upload-artifact@v4
         with:
           name: laermtracker-linux-x86_64

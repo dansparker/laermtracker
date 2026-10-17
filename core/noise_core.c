@@ -733,3 +733,156 @@ void nc_flush(nc_t *n)
 {
     if (n->state == NC_ACTIVE && n->wav) finish_event(n);
 }
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Nachtraegliche Pegelkorrektur: rechnet vorhandene Ergebnisse (EVENTS.CSV, TAG.CSV, Ereignis- und Tagesplots) um delta_db um.
+ * Alle Pegel (LAeq, LAFmax, Lpeak, LAE, Hintergrund) sind linear in der Kalibrierung, verschieben sich also genau um delta_db.
+ * Neu bewertet werden daraus abgeleitete Angaben: Ueberschreitung/Stoerung gegen den Grenzwert und KNALL gegen die Knallschwelle
+ * (ein bisheriger KNALL, der darunter faellt, wird zu TUER). Die Ereigniskurven werden aus den WAV-Dateien neu berechnet und auf
+ * den neuen LAFmax ausgerichtet. Das Original bleibt als /EVENTS_ALT.CSV erhalten; die Aktion wird in /KORREKTUR.LOG vermerkt.
+ * ------------------------------------------------------------------------------------------------------------------ */
+
+static int copy_file(nc_t *n, const char *src, const char *dst)
+{
+    void *a = n->io.open(n->io.user, src, 'r');
+    if (!a) return -1;
+    void *b = n->io.open(n->io.user, dst, 'w');
+    if (!b) { n->io.close(n->io.user, a); return -1; }
+    int32_t got; int rc = 0;
+    while ((got = n->io.read(n->io.user, a, n->chunk, sizeof n->chunk)) > 0)
+        if (n->io.write(n->io.user, b, n->chunk, (uint32_t)got)) rc = -1;
+    n->io.close(n->io.user, a); n->io.close(n->io.user, b);
+    return rc;
+}
+
+#define RR_MAX_FRAMES 7400
+
+/* Ereigniskurve (LAF) aus der WAV-Datei neu berechnen und den Plot schreiben */
+static int rerender_event(nc_t *n, const char *wavp, const char *svgp, const char *cls, float laeq, float lae,
+                          int y, int mo, int d, int h, int mi, int s)
+{
+    static int16_t lafs[RR_MAX_FRAMES];                       /* LAF je 10-ms-Frame in 0.1 dB (ohne Kalibrierung) */
+    void *f = n->io.open(n->io.user, wavp, 'r');
+    if (!f) return -1;
+    uint8_t hd[654];
+    if (n->io.read(n->io.user, f, hd, 654) != 654 || memcmp(hd, "RIFF", 4)) { n->io.close(n->io.user, f); return -1; }
+    uint32_t rate = hd[24] | hd[25] << 8 | hd[26] << 16 | (uint32_t)hd[27] << 24;
+    uint32_t dbytes = hd[650] | hd[651] << 8 | hd[652] << 16 | (uint32_t)hd[653] << 24;
+    if (rate < 8000 || rate % 100 || dbytes < 2) { n->io.close(n->io.user, f); return -1; }
+    uint32_t fl = rate / 100;
+    nc_biquad_t aw[3]; aw_init(aw, rate);
+    int16_t sb[1024]; uint32_t remaining = dbytes / 2, nfr = 0, fp = 0, primed = 0;
+    float sum = 0, e = 0; const float alpha = 1.0f - expf(-0.010f / 0.125f);
+    while (remaining) {
+        uint32_t want = remaining < 1024 ? remaining : 1024;
+        int32_t got = n->io.read(n->io.user, f, sb, want * 2) / 2;
+        if (got <= 0) break;
+        if (!primed) { primed = 1; for (uint32_t i = 0; i < rate * 3 / 10; i++) aw_run(aw, (float)sb[0] * 256.0f); }   /* Einschwingen */
+        for (int32_t i = 0; i < got; i++) {
+            float yv = aw_run(aw, (float)sb[i] * 256.0f);
+            sum += yv * yv;
+            if (++fp == fl) {
+                float ms = sum / (float)fl; if (ms < 1e-3f) ms = 1e-3f;
+                e = nfr == 0 ? ms : e + alpha * (ms - e);
+                if (nfr < RR_MAX_FRAMES) lafs[nfr++] = (int16_t)lroundf((10.0f * log10f(e / n->ref_rms2) + NC_REF_SPL_DB) * 10.0f);
+                sum = 0; fp = 0;
+            }
+        }
+        remaining -= (uint32_t)got;
+    }
+    /* Zeitmarken (cue-Chunk hinter den Daten): Ausloesung und LAFmax */
+    uint32_t trig = 100, mx = 0xFFFFFFFFu;
+    if (n->io.seek(n->io.user, f, 654 + dbytes + (dbytes & 1)) == 0) {
+        uint8_t cu[12 + 24 * 3];
+        if (n->io.read(n->io.user, f, cu, sizeof cu) == (int32_t)sizeof cu && !memcmp(cu, "cue ", 4)) {
+            trig = (cu[12 + 20] | cu[12 + 21] << 8 | cu[12 + 22] << 16 | (uint32_t)cu[12 + 23] << 24) / fl;
+            mx = (cu[36 + 20] | cu[36 + 21] << 8 | cu[36 + 22] << 16 | (uint32_t)cu[36 + 23] << 24) / fl;
+        }
+    }
+    n->io.close(n->io.user, f);
+    if (nfr == 0) return -1;
+    if (trig >= nfr) trig = 0;
+    int16_t best = -32768; uint32_t bi = trig;
+    for (uint32_t i = trig; i < nfr; i++) if (lafs[i] > best) { best = lafs[i]; bi = i; }
+    if (mx >= nfr) mx = bi;
+    int16_t align = (int16_t)lroundf(n->ev_lafmax * 10.0f) - best;     /* Kurve auf den neuen LAFmax der CSV ausrichten */
+    n->plot_n = 0;
+    for (uint32_t i = 0; i < nfr && n->plot_n < NC_MAX_PLOT_BINS; i += 10) {
+        int16_t m = -32768;
+        for (uint32_t k = i; k < i + 10 && k < nfr; k++) if (lafs[k] > m) m = lafs[k];
+        int v = m + align; n->plot[n->plot_n++] = (int16_t)(v < 0 ? 0 : v);
+    }
+    n->ev_trig_frame = trig; n->ev_lafmax_frame = mx;
+    write_svg(n, svgp, cls, laeq, lae, y, mo, d, h, mi, s);
+    return 0;
+}
+
+static void recal_line(nc_t *n, const char *line, float delta, nc_recal_t *res, char days[][8], uint32_t *nd)
+{
+    if (line[0] < '0' || line[0] > '9') return;                 /* Kopfzeile / Muell */
+    char buf[512]; snprintf(buf, sizeof buf, "%s", line);
+    char *fld[17]; int nf = 0; fld[nf++] = buf;
+    for (char *p = buf; *p && nf < 17; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
+    if (nf < 15 || strlen(fld[13]) < 12) { res->skipped++; return; }
+    float laeq = parse10(fld[5]) / 10.0f + delta, lafmax = parse10(fld[6]) / 10.0f + delta, lpk = parse10(fld[7]) / 10.0f + delta;
+    float lae = parse10(fld[8]) / 10.0f + delta, bg = parse10(fld[9]) / 10.0f + delta, lim = parse10(fld[10]) / 10.0f;
+    float over = lafmax - lim; int dist = over >= 0.0f;
+    const char *cls = lafmax >= n->cfg.slam_lafmax_dba ? "KNALL" : (!strcmp(fld[3], "KNALL") ? "TUER" : fld[3]);
+    char a[16], b[16], c[16], dd[16], e[16], ov[16], row[400];
+    fmt1(a, sizeof a, laeq); fmt1(b, sizeof b, lafmax); fmt1(c, sizeof c, lpk); fmt1(dd, sizeof dd, lae); fmt1(e, sizeof e, bg); fmt1(ov, sizeof ov, over);
+    snprintf(row, sizeof row, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;%s;%s;%s\n", fld[0], fld[1], fld[2], cls, fld[4], a, b, c, dd, e, fld[10], ov,
+             dist, fld[13], fld[14], nf > 15 ? fld[15] : "0");
+    char day[8] = {0}; snprintf(day, sizeof day, "%.6s", fld[13] + 1);
+    int seen = 0;
+    for (uint32_t i = 0; i < *nd; i++) if (!strcmp(days[i], day)) seen = 1;
+    char tagnew[32]; snprintf(tagnew, sizeof tagnew, "/%s/TAG.NEU", day);
+    if (!seen) { if (*nd < 400) snprintf(days[(*nd)++], 8, "%s", day); n->io.remove(n->io.user, tagnew); }
+    csv_append(n, "/EVENTS.NEU", row);
+    csv_append(n, tagnew, row);
+    res->rows++;
+    char wavp[40], svgp[40]; snprintf(wavp, sizeof wavp, "%s", fld[13]); snprintf(svgp, sizeof svgp, "%s", fld[13]);
+    size_t l = strlen(svgp); memcpy(svgp + l - 3, "SVG", 3);
+    n->ev_night = !strcmp(fld[2], "NACHT"); n->ev_limit = lim; n->ev_dist = (uint8_t)dist;
+    n->ev_bg = bg; n->ev_lpeak = lpk; n->ev_lafmax = lafmax;
+    if (rerender_event(n, wavp, svgp, cls, laeq, lae, atoi(fld[0]), atoi(fld[0] + 5), atoi(fld[0] + 8), atoi(fld[1]), atoi(fld[1] + 3), atoi(fld[1] + 6)) == 0)
+        res->svgs++;
+}
+
+int nc_recalibrate(nc_t *n, float delta_db, nc_recal_t *res)
+{
+    static char days[400][8];
+    memset(res, 0, sizeof *res);
+    void *f = n->io.open(n->io.user, "/EVENTS.CSV", 'r');
+    if (!f) return -1;
+    void *bk = n->io.open(n->io.user, "/EVENTS_ALT.CSV", 'w');           /* Originalkopie */
+    n->io.remove(n->io.user, "/EVENTS.NEU");
+    char rbuf[1024], line[512]; uint32_t ll = 0, nd = 0; int32_t got;
+    while ((got = n->io.read(n->io.user, f, rbuf, sizeof rbuf)) > 0) {
+        if (bk) n->io.write(n->io.user, bk, rbuf, (uint32_t)got);
+        for (int32_t i = 0; i < got; i++) {
+            if (rbuf[i] == '\n' || rbuf[i] == '\r') { if (ll) { line[ll] = 0; recal_line(n, line, delta_db, res, days, &nd); ll = 0; } }
+            else if (ll < sizeof line - 1) line[ll++] = rbuf[i];
+        }
+    }
+    if (ll) { line[ll] = 0; recal_line(n, line, delta_db, res, days, &nd); }
+    n->io.close(n->io.user, f);
+    if (bk) n->io.close(n->io.user, bk);
+    if (res->rows == 0) { n->io.remove(n->io.user, "/EVENTS.NEU"); return -2; }
+    if (copy_file(n, "/EVENTS.NEU", "/EVENTS.CSV") == 0) n->io.remove(n->io.user, "/EVENTS.NEU");
+    for (uint32_t i = 0; i < nd; i++) {                                    /* Tagesdateien ersetzen, Tagesdiagramm neu */
+        char src[32], dst[32]; snprintf(src, sizeof src, "/%s/TAG.NEU", days[i]); snprintf(dst, sizeof dst, "/%s/TAG.CSV", days[i]);
+        if (copy_file(n, src, dst) == 0) n->io.remove(n->io.user, src);
+        snprintf(n->dir, sizeof n->dir, "%s", days[i]);
+        write_day_svg(n);
+        res->days++;
+    }
+    int y, mo, d, h, mi, s, ms; nc_civil_from_ms(n->io.now_ms(n->io.user), &y, &mo, &d, &h, &mi, &s, &ms);
+    void *lg = n->io.open(n->io.user, "/KORREKTUR.LOG", 'a');
+    if (lg) {
+        char dl[16]; fmt1(dl, sizeof dl, delta_db);
+        io_printf(n, lg, "%04d-%02d-%02d %02d:%02d:%02d  Pegelkorrektur %s%s dB auf %lu Ereignisse angewendet (Original: EVENTS_ALT.CSV)\n",
+                  y, mo, d, h, mi, s, delta_db >= 0 ? "+" : "", dl, (unsigned long)res->rows);
+        n->io.close(n->io.user, lg);
+    }
+    return 0;
+}
