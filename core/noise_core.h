@@ -113,6 +113,7 @@ typedef struct {
     uint32_t    ev_pre_frames;
     uint32_t    ev_frames;          /* Frames seit Dateianfang */
     uint32_t    ev_last_active;     /* Frame-Index der letzten Aktivitaet */
+    uint32_t    ev_last_L;          /* Frame-Index des letzten Frames mit 10-ms-Pegel >= Endschwelle (Dauer, LAeq) */
     uint32_t    ev_trig_frame;
     uint32_t    ev_max_frames;
     uint32_t    ev_post_frames;

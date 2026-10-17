@@ -465,7 +465,7 @@ static void finish_event_inner(nc_t *n)
     /* Zeitmarken (cue + labl) hinter die Audiodaten */
     uint8_t *b = (uint8_t *)n->chunk, *p = b;
     uint32_t off[3] = { n->ev_trig_frame * n->frame_len, n->ev_lafmax_frame * n->frame_len,
-                        (n->ev_last_active + 1) * n->frame_len };
+                        (n->ev_last_L + 1) * n->frame_len };
     int64_t tm[3] = { n->ev_start_ms + (int64_t)off[0] * 1000 / n->cfg.fs,
                       n->ev_start_ms + (int64_t)off[1] * 1000 / n->cfg.fs,
                       n->ev_start_ms + (int64_t)off[2] * 1000 / n->cfg.fs };
@@ -526,7 +526,7 @@ static void finish_event_inner(nc_t *n)
     write_svg(n, path, cls, laeq, lae, ty, tmo, td, th, tmi, ts);
 
     char dur[16], lp[16], bgs[16], lm[16], ov[16], row[256];
-    uint32_t cs = n->ev_last_active + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
+    uint32_t cs = n->ev_last_L + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
     snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
     fmt1(lp, sizeof lp, lae); fmt1(bgs, sizeof bgs, n->ev_bg);
     fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
@@ -561,8 +561,10 @@ static float end_threshold(const nc_t *n)
 static void event_account(nc_t *n, float L, float laf, float lpk, double meansq, uint32_t idx)
 {
     n->ev_sumA += meansq; n->ev_n++;
-    if (laf >= end_threshold(n)) {                            /* Aktivitaet: LAF (125 ms), nicht der 10-ms-Pegel (Zufallsspitzen) */
-        n->ev_last_active = idx;
+    float thr = end_threshold(n);
+    if (laf >= thr) n->ev_last_active = idx;                  /* Ende-Timer: LAF (125 ms) statt 10-ms-Pegel (Zufallsspitzen) */
+    if (L >= thr) {                                           /* Dauer/LAeq: tatsaechliche Schallenergie, ohne LAF-Nachklingen */
+        n->ev_last_L = idx;
         n->ev_sumA_snap = n->ev_sumA; n->ev_n_snap = n->ev_n;
     }
     if (laf > n->ev_lafmax) { n->ev_lafmax = laf; n->ev_lafmax_frame = idx; }
@@ -601,7 +603,7 @@ static void start_event_inner(nc_t *n, float L, float laf, float lpk, double mea
     n->state = NC_ACTIVE;
     n->ev_frames = pre + 1;
     n->ev_trig_frame = pre;
-    n->ev_last_active = pre;
+    n->ev_last_active = pre; n->ev_last_L = pre;
     n->ev_sumA = 0; n->ev_n = 0; n->ev_sumA_snap = 0; n->ev_n_snap = 0;
     n->ev_lafmax = -999; n->ev_lpeak = -999; n->ev_rise = -999;
     n->ev_bg = n->bg_db;
