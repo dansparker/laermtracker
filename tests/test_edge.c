@@ -250,9 +250,9 @@ int main(int argc, char **argv)
       CHECK(g_nc.events_total == 1, "genau 1 Ereignis, keine Selbstausloesung durch Schreibrauschen (erkannt: %lu)", (unsigned long)g_nc.events_total);
       CHECK(atof(act) < 4.0, "Ereignis endet rechtzeitig (aktive Dauer %s s)", act); }
 
-    printf("T11: WAV-Hochpass 25 Hz: 4-Hz-Wummern (156 Counts) und DC (1170 Counts) fallen weg, 1-kHz-Ton (78 Counts) bleibt\n");
-    { static burst_t b[1]; b[0] = (burst_t){ 5.0, 0.8, 78.0, 0.10, 0, 0 }; sim_t o = { 12, 0, 0, NULL, 0 };
-      g_hpf = 25.0f; g_lf_amp = 40000.0; g_dc = 300000.0; g_tone = 20000.0;
+    printf("T11: WAV-Hochpass 25 Hz: 4-Hz-Wummern (156 Counts) und DC (1170 Counts) fallen weg, 1-kHz-Ton (5,9 Counts) bleibt\n");
+    { static burst_t b[1]; b[0] = (burst_t){ 5.0, 0.8, 85.0, 0.10, 0, 0 }; sim_t o = { 12, 0, 0, NULL, 0 };
+      g_hpf = 25.0f; g_lf_amp = 40000.0; g_dc = 300000.0; g_tone = 1500.0;
       run_sim("t11", &o, b, 1, B, 33.0, 0.0);
       g_hpf = 0.0f; g_lf_amp = g_dc = g_tone = 0.0;
       char rel[64]; csv_file(0, rel, sizeof rel); char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
@@ -268,7 +268,7 @@ int main(int argc, char **argv)
           g4 = 2.0 * sqrt(c4 * c4 + s4 * s4) / len; g1k = 2.0 * sqrt(c1 * c1 + s1 * s1) / len;
           CHECK(fabs(mean) < 25.0, "Gleichanteil entfernt: Mittelwert %.1f Counts (Eingang 1172)", mean);
           CHECK(g4 < 12.0, "4-Hz-Wummern: %.1f Counts (Eingang 156) -> um %.0f dB gedaempft", g4, 20 * log10(156.0 / (g4 > 0.01 ? g4 : 0.01)));
-          CHECK(fabs(g1k - 78.1) < 3.0, "1-kHz-Ton unveraendert: %.1f Counts (Eingang 78.1)", g1k);
+          CHECK(fabs(g1k - 5.86) < 0.8, "1-kHz-Ton unveraendert: %.2f Counts (Eingang 5.86)", g1k);
       } else CHECK(0, "WAV nicht lesbar (%u Samples)", (unsigned)ns);
       free(w); }
 
