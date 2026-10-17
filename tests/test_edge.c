@@ -55,6 +55,7 @@ static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
 static int io_remove(void *u, const char *p) { (void)u; char b[400]; full(b, sizeof b, p); return remove(b); }
 static int g_keep_sonst = 1;
+static float g_hpf = 0.0f;
 
 static int64_t days_from_civil(int y, int m, int d)
 {
@@ -67,7 +68,7 @@ static int64_t ms_of(int y, int mo, int d, int h, int mi, int s) { return (days_
 /* ---- Signal ---- */
 typedef struct { double t0, dur, dba, tau, sig, att; } burst_t;
 static burst_t *bursts; static int nb, curb;
-static double bg_dba, bg_mod_db, sig_bg, g2, ref_rms2;
+static double bg_dba, bg_mod_db, sig_bg, g2, ref_rms2, g_lf_amp, g_dc, g_tone;
 static uint32_t rng;
 static double urand(void) { rng = rng * 1664525u + 1013904223u; return (rng >> 8) / 16777216.0 - 0.5; }
 static double gauss(void) { return (urand() + urand() + urand() + urand()) / sqrt(4.0 / 12.0); }
@@ -83,6 +84,7 @@ static void gen_block(uint64_t i0, uint32_t n, int32_t *out)
             double e = t - bursts[curb].t0;
             x += bursts[curb].sig * (1.0 - exp(-e / (bursts[curb].att > 0 ? bursts[curb].att : 0.002))) * exp(-e / bursts[curb].tau) * gauss();
         }
+        x += g_dc + g_lf_amp * sin(6.283185307 * 4.0 * t) + g_tone * sin(6.283185307 * 1000.0 * t);
         long v = lrint(x); out[k] = (int32_t)(v > 8388607 ? 8388607 : (v < -8388608 ? -8388608 : v));
     }
 }
@@ -109,7 +111,7 @@ static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64
     bg_dba = bg; bg_mod_db = mod; sig_bg = sigma_for(bg); rng = 7; g_pushed = 0; g_base = base;
     nc_config_t cfg; nc_default_config(&cfg);
     nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
-    cfg.keep_sonst = (uint8_t)g_keep_sonst;
+    cfg.keep_sonst = (uint8_t)g_keep_sonst; cfg.wav_hpf_hz = g_hpf;
     nc_init(&g_nc, &cfg, &io, g_ring, RING);
     if (o->wrap_offset) { g_nc.wr = g_nc.M - o->wrap_offset; g_nc.widx = g_nc.wr % g_nc.ring_len; }
     static int32_t blk[256];
@@ -247,6 +249,28 @@ int main(int argc, char **argv)
       char act[32] = "99"; csv_col(0, 4, act, sizeof act);
       CHECK(g_nc.events_total == 1, "genau 1 Ereignis, keine Selbstausloesung durch Schreibrauschen (erkannt: %lu)", (unsigned long)g_nc.events_total);
       CHECK(atof(act) < 4.0, "Ereignis endet rechtzeitig (aktive Dauer %s s)", act); }
+
+    printf("T11: WAV-Hochpass 25 Hz: 4-Hz-Wummern (156 Counts) und DC (1170 Counts) fallen weg, 1-kHz-Ton (78 Counts) bleibt\n");
+    { static burst_t b[1]; b[0] = (burst_t){ 5.0, 0.8, 78.0, 0.10, 0, 0 }; sim_t o = { 12, 0, 0, NULL, 0 };
+      g_hpf = 25.0f; g_lf_amp = 40000.0; g_dc = 300000.0; g_tone = 20000.0;
+      run_sim("t11", &o, b, 1, B, 33.0, 0.0);
+      g_hpf = 0.0f; g_lf_amp = g_dc = g_tone = 0.0;
+      char rel[64]; csv_file(0, rel, sizeof rel); char p[400]; snprintf(p, sizeof p, "%s%s", g_cur, rel);
+      FILE *f = fopen(p, "rb"); uint8_t h[654]; int ok = f && fread(h, 1, 654, f) == 654;
+      uint32_t ns = ok ? (h[650] | h[651] << 8 | h[652] << 16 | (uint32_t)h[653] << 24) / 2 : 0;
+      int16_t *w = ok ? malloc(ns * 2) : NULL; if (ok && fread(w, 2, ns, f) != ns) ok = 0; if (f) fclose(f);
+      if (ok && ns > 96000) {
+          /* Auswertung ab 1 s nach Dateianfang (Filter eingeschwungen), 2 s lang */
+          const int16_t *a = w + 32000; int len = 64000; double mean = 0; for (int k = 0; k < len; k++) mean += a[k]; mean /= len;
+          double g4 = 0, g1k = 0, c4 = 0, s4 = 0, c1 = 0, s1 = 0;
+          for (int k = 0; k < len; k++) { double t = k / (double)FS, x = a[k] - mean;
+              c4 += x * cos(6.283185307 * 4.0 * t); s4 += x * sin(6.283185307 * 4.0 * t); c1 += x * cos(6.283185307 * 1000.0 * t); s1 += x * sin(6.283185307 * 1000.0 * t); }
+          g4 = 2.0 * sqrt(c4 * c4 + s4 * s4) / len; g1k = 2.0 * sqrt(c1 * c1 + s1 * s1) / len;
+          CHECK(fabs(mean) < 25.0, "Gleichanteil entfernt: Mittelwert %.1f Counts (Eingang 1172)", mean);
+          CHECK(g4 < 12.0, "4-Hz-Wummern: %.1f Counts (Eingang 156) -> um %.0f dB gedaempft", g4, 20 * log10(156.0 / (g4 > 0.01 ? g4 : 0.01)));
+          CHECK(fabs(g1k - 78.1) < 3.0, "1-kHz-Ton unveraendert: %.1f Counts (Eingang 78.1)", g1k);
+      } else CHECK(0, "WAV nicht lesbar (%u Samples)", (unsigned)ns);
+      free(w); }
 
     printf("\n%s (%d Fehler)\n", failures ? "FEHLGESCHLAGEN" : "ALLE GRENZFALLTESTS BESTANDEN", failures);
     return failures != 0;

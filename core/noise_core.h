@@ -40,6 +40,7 @@ typedef struct {
     float    lim_night_dba;    /* Grenzwert nachts (WHO 2009: 42 dB LAmax innen)   */
     float    lim_day_dba;      /* Grenzwert tags (eigene Annahme, anpassbar)       */
     uint8_t  keep_sonst;       /* 0 = nicht impulshafte Ereignisse (SONST) wieder loeschen */
+    float    wav_hpf_hz;       /* >0: Hochpass 2. Ordnung auf die gespeicherte WAV (entfernt DC-Offset und SD-Schreib-Wummern), 0 = Rohdaten */
 } nc_config_t;
 
 typedef struct {
@@ -136,6 +137,9 @@ typedef struct {
     uint32_t    events_total;
     uint32_t    holdoff;            /* Frames Pause nach SD-Fehler */
     uint32_t    io_errors;          /* fehlgeschlagene Schreibzugriffe auf die WAV-Datei */
+    float       hp_b[3], hp_a[2];   /* WAV-Hochpass: Koeffizienten (Direktform 1) */
+    float       hp_x1, hp_x2, hp_y1, hp_y2;
+    uint8_t     hp_prime;           /* Zustand beim naechsten Sample auf den Gleichanteil setzen */
     uint32_t    events_dropped;     /* verworfene SONST-Ereignisse (keep_sonst = 0) */
     uint32_t    blk_from[NC_BLK], blk_to[NC_BLK], blk_n;   /* Samplebereiche waehrend SD-Zugriffen: Stoergeraeusche, nicht auswerten */
     float       ev_limit;           /* Grenzwert des laufenden Ereignisses */

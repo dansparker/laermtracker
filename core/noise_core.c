@@ -138,6 +138,7 @@ void nc_default_config(nc_config_t *c)
     c->lim_night_dba = 42.0f;
     c->lim_day_dba = 55.0f;
     c->keep_sonst = 1;
+    c->wav_hpf_hz = 0.0f;
 }
 
 void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, uint32_t ring_len)
@@ -150,6 +151,12 @@ void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, ui
     n->ref_peak = (float)ref_pk;
     n->ref_rms2 = (float)(ref_pk * ref_pk / 2.0);
     aw_init(n->aw, c->fs);
+    if (c->wav_hpf_hz > 0.0f) {                                /* Butterworth-Hochpass 2. Ordnung */
+        double w0 = 2.0 * PI_F * c->wav_hpf_hz / c->fs, cw = cos(w0), al = sin(w0) / (2.0 * 0.70710678);
+        double a0 = 1.0 + al;
+        n->hp_b[0] = (float)((1.0 + cw) / 2.0 / a0); n->hp_b[1] = (float)(-(1.0 + cw) / a0); n->hp_b[2] = n->hp_b[0];
+        n->hp_a[0] = (float)(-2.0 * cw / a0); n->hp_a[1] = (float)((1.0 - al) / a0);
+    }
     n->ev_max_frames = c->max_event_ms / 10;
     n->ev_post_frames = c->post_ms / 10;
     if (n->ev_max_frames > NC_MAX_PLOT_BINS * 10 - 20) n->ev_max_frames = NC_MAX_PLOT_BINS * 10 - 20;
@@ -192,7 +199,7 @@ static void drain(nc_t *n, int all)
     uint32_t wr = n->wr;                                    /* Schnappschuss (ISR schreibt weiter) */
     if (pdist(n, n->rd, wr) > n->ring_len) {                /* Ring ueberlaufen: SD zu langsam */
         uint32_t lost = pdist(n, n->rd, wr) - n->ring_len;
-        n->rd = (uint32_t)(((uint64_t)n->rd + lost) % n->M); n->overruns += lost;
+        n->rd = (uint32_t)(((uint64_t)n->rd + lost) % n->M); n->overruns += lost; n->hp_prime = 1;
     }
     if (!all && pdist(n, n->rd, wr) < NC_DRAIN_MIN) return;
     for (;;) {
@@ -201,7 +208,15 @@ static void drain(nc_t *n, int all)
         uint32_t cnt = avail < NC_CHUNK_SAMPLES ? avail : NC_CHUNK_SAMPLES;
         uint32_t ri = n->rd % n->ring_len;
         for (uint32_t i = 0; i < cnt; i++) {
-            n->chunk[i] = n->ring[ri];
+            int16_t v = n->ring[ri];
+            if (n->cfg.wav_hpf_hz > 0.0f) {                    /* Hochpass nur auf die gespeicherten Daten, Pegelmessung bleibt roh */
+                float x = (float)v;
+                if (n->hp_prime) { n->hp_x1 = n->hp_x2 = x; n->hp_y1 = n->hp_y2 = 0.0f; n->hp_prime = 0; }
+                float y = n->hp_b[0] * x + n->hp_b[1] * n->hp_x1 + n->hp_b[2] * n->hp_x2 - n->hp_a[0] * n->hp_y1 - n->hp_a[1] * n->hp_y2;
+                n->hp_x2 = n->hp_x1; n->hp_x1 = x; n->hp_y2 = n->hp_y1; n->hp_y1 = y;
+                v = (int16_t)(y > 32767.0f ? 32767 : (y < -32768.0f ? -32768 : (y >= 0 ? y + 0.5f : y - 0.5f)));
+            }
+            n->chunk[i] = v;
             if (++ri == n->ring_len) ri = 0;
         }
         uint32_t p0 = n->wr;
@@ -599,6 +614,7 @@ static void start_event_inner(nc_t *n, float L, float laf, float lpk, double mea
     n->wav = n->io.open(n->io.user, path, 'w');
     if (!n->wav) { n->holdoff = 300; return; }             /* SD-Fehler: verwerfen, 3 s Pause */
     wav_begin(n, y, mo, d, h, mi, s, ms);
+    n->hp_prime = 1;
 
     n->plot_n = 0; n->bin_cnt = 0;
     for (uint32_t i = 0; i <= pre; i++)                    /* Vorlauf aus der Historie + Ausloeseframe */
