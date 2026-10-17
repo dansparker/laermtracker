@@ -88,6 +88,25 @@ make -C fw               # -> fw/build/laermtracker.bin  (HSE nicht 8 MHz: make 
 Die CI baut beides bei jedem Push; die `.bin` und die Testausgaben (WAV/SVG/CSV) hängen als Artefakte an.
 Flashen z. B. mit `st-flash write fw/build/laermtracker.bin 0x08000000` oder STM32CubeProgrammer (SWD-Stiftleiste am Board).
 
+## PC-Version (Windows und Linux, USB-Mikrofon, Ausgabe auf die Festplatte)
+Derselbe Kern (`core/`) mit einem USB-/Systemmikrofon als Eingang; die Dateien landen auf der Festplatte
+(Standard: Benutzerordner `Laermtracker`, mit `--out` änderbar), Struktur wie auf der SD-Karte.
+
+```sh
+laermtracker --list                          # Aufnahmegeräte anzeigen
+laermtracker --calibrate --device 1          # Empfindlichkeit mit 94-dB-Kalibrator (1 kHz) messen -> gibt --sens aus
+laermtracker --device 1 --sens -32           # Überwachung starten (Strg+C beendet)
+laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe   # vorhandene WAV analysieren
+```
+- **Windows:** fertige `laermtracker.exe` als CI-Artefakt `laermtracker-windows` (kein Installer nötig), oder mit
+  MinGW selbst bauen: `make -C pc windows`. Eingang über WinMM (`--device N`).
+- **Linux:** `sudo apt install libasound2-dev && make -C pc`, Eingang über ALSA (`--device default` oder `plughw:1,0`).
+- **Wichtig:** Ein USB-Mikrofon hat eine unbekannte Empfindlichkeit. Ohne `--calibrate`/`--sens` sind die dB-Werte nur Schätzungen.
+  Automatische Verstärkung (AGC) und „Klangverbesserungen“ in den Systemeinstellungen abschalten, sonst sind die Pegel unbrauchbar.
+- Alle Schwellen (`--trig-min`, `--trig-delta`, `--post-ms`, `--lim-night`, …) stehen in `laermtracker --help`.
+- Getestet in der CI: Analyse einer synthetischen Aufnahme (Tür, Knall, Knall nachts) unter Windows und Linux. Das Mikrofon
+  selbst (WinMM/ALSA) ist ungetestet auf echter Hardware.
+
 ## Aufbau
 - `core/noise_core.[ch]` – hardwareunabhängig. `nc_push24()` läuft im DMA-Interrupt (A-Filter, 10-ms-Frames,
   Ringpuffer), `nc_poll()` in der Hauptschleife (Zustandsautomat, Dateizugriffe; darf auf die SD warten, ohne Samples zu verlieren).
