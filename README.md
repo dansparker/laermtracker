@@ -98,6 +98,10 @@ laermtracker --calibrate --device 1          # Empfindlichkeit mit 94-dB-Kalibra
 laermtracker --device 1 --sens -32           # Überwachung starten (Strg+C beendet)
 laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe   # vorhandene WAV analysieren
 ```
+- **Windows-Oberfläche:** `laermtracker-gui.exe` (reines C/Win32, kein Installer): Mikrofon wählen, Empfindlichkeit eintragen oder per
+  „Kalibrieren“ messen, Ausgabeordner wählen, Start. Live-Pegelverlauf der letzten 2 Minuten, Ereignisliste (Störungen rot),
+  Tagesdiagramm und CSV per Knopfdruck. Einstellungen werden in `%APPDATA%\Laermtracker\settings.ini` gespeichert.
+  Bauen: `windres pc/gui.rc -O coff -o gui_rc.o && gcc -mwindows -o laermtracker-gui.exe pc/gui.c core/noise_core.c gui_rc.o -lwinmm -lcomctl32 -lshell32 -lole32 -lgdi32 -luser32 -lm`.
 - **Windows:** fertige `laermtracker.exe` als CI-Artefakt `laermtracker-windows` (kein Installer nötig), oder mit
   MinGW selbst bauen: `make -C pc windows`. Eingang über WinMM (`--device N`).
 - **Linux:** `sudo apt install libasound2-dev && make -C pc`, Eingang über ALSA (`--device default` oder `plughw:1,0`).
