@@ -46,3 +46,32 @@ jobs:
         with:
           name: firmware
           path: dist/
+  pc-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PC-Version bauen (WAV-Eingabe)
+        run: gcc -std=gnu99 -O2 -Wall -Wextra -o laermtracker pc/laermtracker.c core/noise_core.c -lm
+      - name: Testaufnahme erzeugen und analysieren
+        run: |
+          python3 tests/make_test_wav.py test_in.wav
+          ./laermtracker --wav-in test_in.wav --start "2026-10-03 21:59:30" --out out_pc
+          python3 tests/check_pc.py out_pc
+  pc-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PC-Version bauen (MinGW, statisch)
+        shell: bash
+        run: gcc -std=gnu99 -O2 -Wall -Wextra -static -o laermtracker.exe pc/laermtracker.c core/noise_core.c -lwinmm -lm
+      - name: Testaufnahme erzeugen und analysieren
+        shell: bash
+        run: |
+          python tests/make_test_wav.py test_in.wav
+          ./laermtracker.exe --wav-in test_in.wav --start "2026-10-03 21:59:30" --out out_pc
+          python tests/check_pc.py out_pc
+          ./laermtracker.exe --list
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laermtracker-windows
+          path: laermtracker.exe
