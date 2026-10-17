@@ -11,7 +11,7 @@ BUILD ?= build
 
 D := deps
 HAL := $(D)/hal
-FF := $(shell dirname $$(find $(D)/fatfs -name ff.c | head -n1))
+FF := third_party/fatfs
 HAL_SRC := stm32f4xx_hal stm32f4xx_hal_cortex stm32f4xx_hal_dma stm32f4xx_hal_flash stm32f4xx_hal_flash_ex \
   stm32f4xx_hal_gpio stm32f4xx_hal_i2s stm32f4xx_hal_pwr stm32f4xx_hal_pwr_ex stm32f4xx_hal_rcc stm32f4xx_hal_rcc_ex \
   stm32f4xx_hal_rtc stm32f4xx_hal_rtc_ex stm32f4xx_hal_sd stm32f4xx_ll_sdmmc
