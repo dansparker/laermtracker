@@ -39,4 +39,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: fw/build/laermtracker.bin
+          path: |
+            fw/build/laermtracker.bin
+            fw/build/laermtracker.elf
+            fw/build/laermtracker.map

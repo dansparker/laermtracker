@@ -1,11 +1,14 @@
 /*
- * FatFs-Anbindung an HAL_SD: 4-Bit-SDIO mit DMA.
- * Wichtig: reine Polling-Transfers (HAL_SD_ReadBlocks/WriteBlocks) laufen bei aktivem Audio-Interrupt in FIFO-Unterlaeufe
- * (Schreibfehler -> FatFs sperrt die Datei: WAV abgeschnitten, Header 0). Mit DMA + Wiederholung tritt das nicht auf.
+ * FatFs-Anbindung an HAL_SD (4-Bit-SDIO, Polling).
+ * Der Audio-Interrupt dauert laenger als der SDIO-FIFO (32 Byte = ca. 5 us) braucht, um leerzulaufen. Deshalb werden die
+ * Datenphasen mit gesperrten Interrupts ausgefuehrt (max. 4 Sektoren = ca. 0,4 ms; I2S-DMA laeuft in der Hardware weiter,
+ * der Halbpuffer hat 8 ms Reserve). Die Wartezeit auf die Karte (Programmierung) laeuft mit freigegebenen Interrupts.
+ * Schlaegt ein Transfer fehl, wird er nach CMD12 bis zu 4x wiederholt.
  */
 #include "ff.h"
 #include "diskio.h"
 #include "stm32f4xx_hal.h"
+#include "dbg.h"
 
 extern SD_HandleTypeDef hsd;
 #define SD_TIMEOUT_MS 1000u
@@ -13,35 +16,32 @@ extern SD_HandleTypeDef hsd;
 #define BOUNCE_SECT   4                                       /* 2 kB: ausgerichteter Zwischenpuffer */
 
 static uint32_t bounce[BOUNCE_SECT * 128] __attribute__((aligned(16)));
-static volatile uint32_t sd_done;                             /* 1 = fertig, 2 = Fehler */
-
-void HAL_SD_TxCpltCallback(SD_HandleTypeDef *h) { (void)h; sd_done = 1; }
-void HAL_SD_RxCpltCallback(SD_HandleTypeDef *h) { (void)h; sd_done = 1; }
-void HAL_SD_ErrorCallback(SD_HandleTypeDef *h)  { (void)h; sd_done = 2; }
-void HAL_SD_AbortCallback(SD_HandleTypeDef *h)  { (void)h; }
 
 static int wait_transfer(void)
 {
     uint32_t t0 = HAL_GetTick();
-    while (HAL_SD_GetCardState(&hsd) != HAL_SD_CARD_TRANSFER)
+    while (HAL_SD_GetCardState(&hsd) != HAL_SD_CARD_TRANSFER) {
+        WDG_KICK();
         if (HAL_GetTick() - t0 > SD_TIMEOUT_MS) return -1;
+    }
     return 0;
 }
 
-/* buf muss 16-Byte-ausgerichtet sein */
 static int sd_xfer(int write, uint8_t *buf, uint32_t sector, uint32_t count)
 {
+    DBG_SD_OP = ((write ? 2u : 1u) << 24) | count; DBG_SD_SECT = sector;
     for (int attempt = 0; attempt < SD_RETRIES; attempt++) {
+        WDG_KICK();
         if (attempt) { HAL_SD_Abort(&hsd); HAL_Delay(2); }     /* Karte nach Fehler (CMD12) wieder in den Transfer-Zustand */
         if (wait_transfer()) continue;
-        sd_done = 0;
-        HAL_StatusTypeDef r = write ? HAL_SD_WriteBlocks_DMA(&hsd, buf, sector, count)
-                                    : HAL_SD_ReadBlocks_DMA(&hsd, buf, sector, count);
-        if (r != HAL_OK) continue;
-        uint32_t t0 = HAL_GetTick();
-        while (!sd_done && HAL_GetTick() - t0 < SD_TIMEOUT_MS) {}
-        if (sd_done == 1 && !wait_transfer()) return 0;
+        __disable_irq();
+        HAL_StatusTypeDef r = write ? HAL_SD_WriteBlocks(&hsd, buf, sector, count, SD_TIMEOUT_MS)
+                                    : HAL_SD_ReadBlocks(&hsd, buf, sector, count, SD_TIMEOUT_MS);
+        __enable_irq();
+        if (r == HAL_OK && !wait_transfer()) { DBG_SD_OP = 0; return 0; }
+        DBG_SD_ERR = hsd.ErrorCode;
     }
+    DBG_SD_OP = 0;
     return -1;
 }
 
