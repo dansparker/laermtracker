@@ -87,16 +87,65 @@ static float level_laf(void)
     float e = g_nc.laf_energy; if (e < 1e-6f) e = 1e-6f;
     return 10.0f * log10f(e / g_nc.ref_rms2) + NC_REF_SPL_DB + g_cal_db;
 }
-static void report_events(uint32_t *seen_total, uint32_t *seen_dropped)
+static int g_status_ms = 1000, g_log_lines;
+
+static float trig_thr(void)
 {
-    if (g_nc.events_total != *seen_total) {
-        *seen_total = g_nc.events_total;
-        printf("\n[Ereignis gespeichert] %s" PSEP "%s.WAV\n", g_nc.dir, g_nc.base); fflush(stdout);
+    float t = g_nc.bg_db + g_nc.cfg.trig_delta_db;
+    return t < g_nc.cfg.trig_min_dba ? g_nc.cfg.trig_min_dba : t;
+}
+
+static void hms(char *o, size_t sz)
+{
+    int y, mo, d, h, mi, s, ms; nc_civil_from_ms(io_now(NULL), &y, &mo, &d, &h, &mi, &s, &ms);
+    snprintf(o, sz, "%02d:%02d:%02d", h, mi, s);
+}
+
+/* Felder der letzten Zeile von EVENTS.CSV */
+static int last_csv_fields(char *buf, size_t sz, char *fld[], int max)
+{
+    char p[400]; full(p, sizeof p, "/EVENTS.CSV");
+    FILE *f = fopen(p, "rb"); if (!f) return 0;
+    fseek(f, 0, SEEK_END); long len = ftell(f); long from = len > (long)sz - 1 ? len - (long)sz + 1 : 0;
+    fseek(f, from, SEEK_SET); size_t n = fread(buf, 1, sz - 1, f); fclose(f); buf[n] = 0;
+    while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = 0;
+    char *line = strrchr(buf, '\n'); line = line ? line + 1 : buf;
+    int nf = 0; fld[nf++] = line;
+    for (char *q = line; *q && nf < max; q++) if (*q == ';') { *q = 0; fld[nf++] = q + 1; }
+    return nf;
+}
+
+/* Wird nach jedem Audioblock aufgerufen: meldet Ausloesung, gespeicherte/verworfene Ereignisse und (periodisch) den Pegel */
+static void ui_tick(void)
+{
+    static uint32_t seen_t, seen_d; static int was_active; static uint64_t last_ms;
+    const char *nl = g_log_lines ? "" : "\n";                               /* Statuszeile nicht ueberschreiben */
+    char ts[16];
+    int act = g_nc.state == NC_ACTIVE;
+    if (act && !was_active) {
+        hms(ts, sizeof ts);
+        printf("%s[%s] AUSGELOEST: LAF %.1f dB(A), Schwelle %.1f dB(A)\n", nl, ts, level_laf(), trig_thr());
     }
-    if (g_nc.events_dropped != *seen_dropped) {
-        *seen_dropped = g_nc.events_dropped;
-        printf("\n[Ereignis verworfen: nicht impulshaft]\n"); fflush(stdout);
+    was_active = act;
+    if (g_nc.events_total != seen_t) {
+        seen_t = g_nc.events_total;
+        char buf[1024]; char *f[16]; int nf = last_csv_fields(buf, sizeof buf, f, 16);
+        if (nf >= 14)
+            printf("%s[%.8s] Ereignis gespeichert: %s, LAFmax %s dB(A), LAeq %s dB(A), %s s aktiv%s -> %s\n", nl, f[1], f[3], f[6], f[5], f[4],
+                   !strcmp(f[12], "1") ? "  ** STOERUNG (+" : "", f[13]);
+        else printf("%s[Ereignis gespeichert] %s" PSEP "%s.WAV\n", nl, g_nc.dir, g_nc.base);
+        if (nf >= 14 && !strcmp(f[12], "1")) printf("   ueber Grenzwert: +%s dB **\n", f[11]);
     }
+    if (g_nc.events_dropped != seen_d) { seen_d = g_nc.events_dropped; printf("%s[Ereignis verworfen: nicht impulshaft]\n", nl); }
+    if (g_status_ms > 0) {
+        uint64_t ms = g_pushed * 1000ull / g_fs;
+        if (ms - last_ms >= (uint64_t)g_status_ms) {
+            last_ms = ms;
+            if (g_log_lines) { hms(ts, sizeof ts); printf("[%s] LAF %.1f dB(A) | Hintergrund %.1f | Schwelle %.1f%s\n", ts, level_laf(), g_nc.bg_db, trig_thr(), act ? " | AUFNAHME" : ""); }
+            else printf("\rLAF %5.1f dB(A)  Hintergrund %5.1f  Schwelle %5.1f  %s   ", level_laf(), g_nc.bg_db, trig_thr(), act ? "[AUFNAHME]" : "          ");
+        }
+    }
+    fflush(stdout);
 }
 
 /* ---------------------------------------------------------------- WAV-Eingabe */
@@ -169,7 +218,7 @@ static int run_mic(int dev, int calibrate)
     waveInStart(hwi);
     printf(calibrate ? "Kalibrierung: Kalibrator (94 dB, 1 kHz) ans Mikrofon halten ... 6 s\n"
                      : "Ueberwachung laeuft (Strg+C beendet). Ausgabe: %s\n", g_out);
-    int next = 0; uint32_t seen_t = 0, seen_d = 0; uint64_t total = 0, tick = 0;
+    int next = 0; uint64_t total = 0;
     double sum = 0, sumsq = 0; uint64_t ncal = 0;
     while (!g_stop) {
         WaitForSingleObject(ev, 200);
@@ -182,11 +231,7 @@ static int run_mic(int dev, int calibrate)
             } else feed(buf[next], n);
             waveInAddBuffer(hwi, &hdr[next], sizeof hdr[next]);
             next = (next + 1) % NBUF;
-            if (!calibrate && ++tick % 10 == 0) {                            /* ca. 1 Mal pro Sekunde */
-                report_events(&seen_t, &seen_d);
-                printf("\rLAF %5.1f dB(A)  Hintergrund %5.1f dB(A)  %s   ", level_laf(), g_nc.bg_db, g_nc.state == NC_ACTIVE ? "[AUFNAHME]" : "          ");
-                fflush(stdout);
-            }
+            if (!calibrate) ui_tick();
         }
         if (calibrate && total >= (uint64_t)g_fs * 6) break;
     }
@@ -240,7 +285,7 @@ static int run_alsa(const char *dev, int calibrate)
     uint32_t blen = g_fs / 10; int16_t *buf = malloc(blen * 2);
     printf(calibrate ? "Kalibrierung: Kalibrator (94 dB, 1 kHz) ans Mikrofon halten ... 6 s\n"
                      : "Ueberwachung laeuft (Strg+C beendet). Ausgabe: %s\n", g_out);
-    uint32_t seen_t = 0, seen_d = 0; uint64_t total = 0, tick = 0, ncal = 0; double sum = 0, sumsq = 0;
+    uint64_t total = 0, ncal = 0; double sum = 0, sumsq = 0;
     while (!g_stop) {
         snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, blen);
         if (n < 0) { snd_pcm_recover(pcm, (int)n, 1); continue; }           /* Ueberlauf (xrun) o. ae. */
@@ -250,11 +295,7 @@ static int run_alsa(const char *dev, int calibrate)
             if (total >= (uint64_t)g_fs * 6) break;
         } else {
             feed(buf, (uint32_t)n);
-            if (++tick % 10 == 0) {
-                report_events(&seen_t, &seen_d);
-                printf("\rLAF %5.1f dB(A)  Hintergrund %5.1f dB(A)  %s   ", level_laf(), g_nc.bg_db, g_nc.state == NC_ACTIVE ? "[AUFNAHME]" : "          ");
-                fflush(stdout);
-            }
+            ui_tick();
         }
     }
     snd_pcm_close(pcm); free(buf);
@@ -285,6 +326,9 @@ int main(int argc, char **argv)
                "  --rate HZ               Abtastrate (Standard 48000, Vielfaches von 100)\n"
                "  --wav-in DATEI [--start \"JJJJ-MM-TT hh:mm:ss\"]   statt Mikrofon eine WAV-Datei analysieren\n"
                "  --trig-min dBA (50)  --trig-delta dB (12)  --pre-ms (1000)  --post-ms (3000)  --max-ms (60000)\n"
+               "  --threshold dBA         fester Ausloesepegel (wie --trig-min dBA --trig-delta 0); Ausloesung ab diesem LAeq(10 ms) in dB(A)\n"
+               "  --status-s N            Pegelanzeige alle N Sekunden (0 = aus, Standard 1)\n"
+               "  --log                   zeilenweise Ausgabe mit Uhrzeit statt ueberschreibender Zeile (systemd, Logdateien)\n"
                "  --slam dBA (75)  --night-start h (22)  --night-end h (6)  --lim-night dBA (42)  --lim-day dBA (55)\n"
                "  --recalibrate dB        vorhandene Ergebnisse im --out-Ordner nachtraeglich um dB korrigieren (CSV, Plots, Stoerungen neu; Original: EVENTS_ALT.CSV)\n"
                "  --keep-sonst 0|1        nicht impulshafte Ereignisse (Stimmen, Brummen) behalten (Standard 1)\n"
@@ -329,6 +373,8 @@ int main(int argc, char **argv)
     cfg.lim_night_dba = (float)optd("--lim-night", cfg.lim_night_dba);
     cfg.lim_day_dba = (float)optd("--lim-day", cfg.lim_day_dba);
     cfg.keep_sonst = (uint8_t)optd("--keep-sonst", 1);
+    if (opt("--threshold")) { cfg.trig_min_dba = (float)optd("--threshold", 50); cfg.trig_delta_db = 0.0f; }   /* fester Ausloesepegel */
+    g_status_ms = (int)(optd("--status-s", 1.0) * 1000.0); g_log_lines = flag("--log");
 
     uint32_t ring_len = g_fs * 4;                                           /* 4 s Ringpuffer */
     int16_t *ring = malloc((size_t)ring_len * 2);
@@ -347,13 +393,13 @@ int main(int argc, char **argv)
     }
 
     if (wavin) {
+        if (!opt("--status-s")) g_status_ms = 0;                                  /* bei WAV-Analyse nur Ereignisse melden */
         printf("Analysiere %s (%u Hz, %.1f s), Empfindlichkeit %.1f dBFS@94 dB\n", wavin, (unsigned)g_fs, wav_n / (double)g_fs, sens);
-        uint32_t seen_t = 0, seen_d = 0;
         for (uint32_t i = 0; i < wav_n; i += g_fs / 10) {                   /* in 100-ms-Stuecken */
             uint32_t m = wav_n - i < g_fs / 10 ? wav_n - i : g_fs / 10;
-            feed(wav + i, m); report_events(&seen_t, &seen_d);
+            feed(wav + i, m); ui_tick();
         }
-        nc_flush(&g_nc); report_events(&seen_t, &seen_d);
+        nc_flush(&g_nc); ui_tick();
         printf("Fertig. Gespeichert: %lu, verworfen: %lu. Ausgabe in %s\n", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped, g_out);
         free(wav); free(ring);
         return 0;
