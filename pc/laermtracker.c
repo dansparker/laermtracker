@@ -130,11 +130,11 @@ static void ui_tick(void)
     if (g_nc.events_total != seen_t) {
         seen_t = g_nc.events_total;
         char buf[1024]; char *f[16]; int nf = last_csv_fields(buf, sizeof buf, f, 16);
-        if (nf >= 14)
-            printf("%s[%.8s] Ereignis gespeichert: %s, LAFmax %s dB(A), LAeq %s dB(A), %s s aktiv%s -> %s\n", nl, f[1], f[3], f[6], f[5], f[4],
-                   !strcmp(f[12], "1") ? "  ** STOERUNG (+" : "", f[13]);
-        else printf("%s[Ereignis gespeichert] %s" PSEP "%s.WAV\n", nl, g_nc.dir, g_nc.base);
-        if (nf >= 14 && !strcmp(f[12], "1")) printf("   ueber Grenzwert: +%s dB **\n", f[11]);
+        if (nf >= 14) {
+            char st[64] = "";
+            if (!strcmp(f[12], "1")) snprintf(st, sizeof st, "  [STOERUNG: %s dB ueber Grenzwert]", f[11]);
+            printf("%s[%.8s] Ereignis gespeichert: %s, LAFmax %s dB(A), LAeq %s dB(A), %s s aktiv%s -> %s\n", nl, f[1], f[3], f[6], f[5], f[4], st, f[13]);
+        } else printf("%s[Ereignis gespeichert] %s" PSEP "%s.WAV\n", nl, g_nc.dir, g_nc.base);
     }
     if (g_nc.events_dropped != seen_d) { seen_d = g_nc.events_dropped; printf("%s[Ereignis verworfen: nicht impulshaft]\n", nl); }
     if (g_status_ms > 0) {
