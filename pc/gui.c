@@ -33,7 +33,7 @@ enum { IDC_DEV = 100, IDC_SENS, IDC_CAL, IDC_OUT, IDC_BROWSE, IDC_OPEN, IDC_KORR
 #define NBUF 20
 #define HIST_N 600                    /* 120 s bei 5 Werten/s */
 
-static HWND g_korr, g_hwnd, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_start, g_status, g_list, g_graph, g_cal;
+static HWND g_korr, g_hwnd, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_start, g_status, g_list, g_graph, g_cal;
 static HFONT g_font;
 static nc_t g_nc;
 static char g_out[520];
@@ -95,7 +95,6 @@ static void save_settings(void)
         { L"post", g_post }, { L"limn", g_limn }, { L"limd", g_limd } };
     for (unsigned i = 0; i < sizeof f / sizeof *f; i++) { GetWindowTextW(f[i].h, t, 600); ini_set(f[i].k, t); }
     _snwprintf(t, 20, L"%d", (int)SendMessageW(g_dev, CB_GETCURSEL, 0, 0)); ini_set(L"device", t);
-    ini_set(L"onlydoor", SendMessageW(g_onlydoor, BM_GETCHECK, 0, 0) == BST_CHECKED ? L"1" : L"0");
 }
 
 /* ------------------------------------------------------------ WAV lesen (nur Selbsttest) */
@@ -222,7 +221,7 @@ static void set_edit_d(HWND h, double v, int dec) { wchar_t t[64]; _snwprintf(t,
 
 static void set_controls_enabled(int running)
 {
-    HWND h[] = { GetDlgItem(g_hwnd, IDC_RECAL), g_korr, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_onlydoor, g_cal, GetDlgItem(g_hwnd, IDC_BROWSE) };
+    HWND h[] = { GetDlgItem(g_hwnd, IDC_RECAL), g_korr, g_dev, g_sens, g_out_e, g_trigmin, g_delta, g_post, g_limn, g_limd, g_cal, GetDlgItem(g_hwnd, IDC_BROWSE) };
     for (unsigned i = 0; i < sizeof h / sizeof *h; i++) EnableWindow(h[i], !running);
     SetWindowTextW(g_start, g_running && g_mode == 0 ? L"■ Stopp" : L"▶ Start");
     EnableWindow(g_start, !(running && g_mode != 0));
@@ -243,7 +242,6 @@ static int start_job(int mode)
     cfg.trig_min_dba = (float)edit_d(g_trigmin, 50); cfg.trig_delta_db = (float)edit_d(g_delta, 12);
     cfg.post_ms = (uint32_t)(edit_d(g_post, 3) * 1000.0);
     cfg.lim_night_dba = (float)edit_d(g_limn, 42); cfg.lim_day_dba = (float)edit_d(g_limd, 55);
-    cfg.keep_sonst = SendMessageW(g_onlydoor, BM_GETCHECK, 0, 0) == BST_CHECKED ? 0 : 1;
     if (mode != 1) {
         static int16_t *ring; free(ring);
         uint32_t ring_len = g_fs * 4; ring = malloc((size_t)ring_len * 2);
@@ -283,17 +281,18 @@ static void add_event_row(wchar_t *line)
 {
     wchar_t *f[16]; int nf = 0; f[nf++] = line;
     for (wchar_t *p = line; *p && nf < 16; p++) if (*p == L';') { *p = 0; f[nf++] = p + 1; }
-    if (nf < 13) return;
-    wchar_t zeit[48]; _snwprintf(zeit, 48, L"%ls %.8ls", f[0], f[1]);
-    const wchar_t *typ = !wcscmp(f[3], L"TUER") ? L"Tür" : (!wcscmp(f[3], L"KNALL") ? L"Knall" : L"Sonstiges");
-    wchar_t col[7][48];
-    wcscpy(col[0], zeit); wcscpy(col[1], typ); _snwprintf(col[2], 48, L"%ls dB(A)", f[6]); _snwprintf(col[3], 48, L"%ls dB(A)", f[5]);
-    _snwprintf(col[4], 48, L"%ls s", f[4]); wcscpy(col[5], !wcscmp(f[2], L"NACHT") ? L"Nacht" : L"Tag");
-    wcscpy(col[6], f[12][0] == L'1' ? L"STÖRUNG" : L"–");
-    int bad = f[12][0] == L'1';
+    if (nf < 5) return;
+    int o = (f[3][0] >= L'A' && f[3][0] <= L'Z') ? 1 : 0;           /* alte Dateien: Spalte "typ" */
+    if (nf < 12 + o) return;
+    wchar_t col[6][48];
+    _snwprintf(col[0], 48, L"%ls %.8ls", f[0], f[1]);
+    _snwprintf(col[1], 48, L"%ls dB(A)", f[5 + o]); _snwprintf(col[2], 48, L"%ls dB(A)", f[4 + o]);
+    _snwprintf(col[3], 48, L"%ls s", f[3 + o]); wcscpy(col[4], !wcscmp(f[2], L"NACHT") ? L"Nacht" : L"Tag");
+    int bad = f[11 + o][0] == L'1';
+    _snwprintf(col[5], 48, bad ? L"STÖRUNG (+%ls dB)" : L"–", f[10 + o]);
     LVITEMW it = { LVIF_TEXT | LVIF_PARAM, 0, 0, 0, 0, col[0], 0, 0, bad };
     int idx = (int)SendMessageW(g_list, LVM_INSERTITEMW, 0, (LPARAM)&it);
-    for (int c = 1; c < 7; c++) { LVITEMW s = { LVIF_TEXT, idx, c, 0, 0, col[c], 0, 0, 0 }; SendMessageW(g_list, LVM_SETITEMTEXTW, idx, (LPARAM)&s); }
+    for (int c = 1; c < 6; c++) { LVITEMW s = { LVIF_TEXT, idx, c, 0, 0, col[c], 0, 0, 0 }; SendMessageW(g_list, LVM_SETITEMTEXTW, idx, (LPARAM)&s); }
 }
 
 static void open_path(const wchar_t *rel, int explore)
@@ -348,17 +347,17 @@ static void layout(int W, int H)
     MoveWindow(g_list, 10, 292, W - 20, H - 292 - 44, TRUE);
     MoveWindow(GetDlgItem(g_hwnd, IDC_DAYPLOT), 10, H - 36, 200, 28, TRUE);
     MoveWindow(GetDlgItem(g_hwnd, IDC_CSV), 220, H - 36, 200, 28, TRUE);
-    MoveWindow(g_status, 475, 104, W - 485, 20, TRUE);
+    MoveWindow(g_status, 165, 104, W - 175, 20, TRUE);
 }
 
 static void refresh_status(void)
 {
     wchar_t t[400];
     if (g_running && g_mode == 1) { SetWindowTextW(g_status, L"Kalibrierung läuft … Kalibrator (94 dB, 1 kHz) am Mikrofon halten (6 s)"); return; }
-    if (!g_running) { _snwprintf(t, 400, L"Angehalten.  Gespeichert: %lu, verworfen: %lu", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped); SetWindowTextW(g_status, g_nc.ring ? t : L"Bereit. Mikrofon und Ordner wählen, dann Start."); return; }
+    if (!g_running) { _snwprintf(t, 400, L"Angehalten.  Gespeichert: %lu", (unsigned long)g_nc.events_total); SetWindowTextW(g_status, g_nc.ring ? t : L"Bereit. Mikrofon und Ordner wählen, dann Start."); return; }
     float laf = level_laf(), thr = g_nc.bg_db + g_nc.cfg.trig_delta_db; if (thr < g_nc.cfg.trig_min_dba) thr = g_nc.cfg.trig_min_dba;
-    _snwprintf(t, 400, L"%ls  LAF %.1f dB(A) | Hintergrund %.1f | Auslösung ab %.1f | gespeichert %lu, verworfen %lu",
-             g_nc.state == NC_ACTIVE ? L"● AUFNAHME" : L"Überwachung läuft", laf, g_nc.bg_db, thr, (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped);
+    _snwprintf(t, 400, L"%ls  LAF %.1f dB(A) | Hintergrund %.1f | Auslösung ab %.1f | gespeichert %lu",
+             g_nc.state == NC_ACTIVE ? L"● AUFNAHME" : L"Überwachung läuft", laf, g_nc.bg_db, thr, (unsigned long)g_nc.events_total);
     SetWindowTextW(g_status, t);
 }
 
@@ -383,13 +382,12 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         label(L"Nachlauf [s]:", 400, 72, 80); g_post = edit(IDC_POST, L"3", 480, 70, 40);
         label(L"Grenzwert Nacht / Tag [dB(A)]:", 535, 72, 170); g_limn = edit(IDC_LIMN, L"42", 710, 70, 40); g_limd = edit(IDC_LIMD, L"55", 755, 70, 40);
         g_start = mk(L"BUTTON", L"▶ Start", BS_DEFPUSHBUTTON, 10, 98, 140, 30, IDC_START, 0);
-        g_onlydoor = mk(L"BUTTON", L"Nur Tür/Knall behalten (Stimmen verwerfen)", BS_AUTOCHECKBOX, 165, 104, 300, 20, IDC_ONLYDOOR, 0);
-        g_status = mk(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS, 475, 104, 440, 20, IDC_STATUS, 0);
+        g_status = mk(L"STATIC", L"", SS_LEFT | SS_ENDELLIPSIS, 165, 104, 740, 20, IDC_STATUS, 0);
         g_graph = CreateWindowExW(WS_EX_CLIENTEDGE, L"LevelGraph", L"", WS_CHILD | WS_VISIBLE, 10, 134, 860, 150, h, (HMENU)IDC_GRAPH, GetModuleHandle(NULL), NULL);
         g_list = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"", WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS, 10, 292, 860, 250, h, (HMENU)IDC_LIST, GetModuleHandle(NULL), NULL);
         SendMessageW(g_list, WM_SETFONT, (WPARAM)g_font, TRUE);
         SendMessageW(g_list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_DOUBLEBUFFER);
-        list_col(0, L"Zeit", 170); list_col(1, L"Art", 90); list_col(2, L"LAFmax", 100); list_col(3, L"LAeq", 100); list_col(4, L"Dauer", 80); list_col(5, L"Zeitraum", 80); list_col(6, L"Beurteilung", 110);
+        list_col(0, L"Zeit", 190); list_col(1, L"LAFmax", 110); list_col(2, L"LAeq", 110); list_col(3, L"Dauer", 90); list_col(4, L"Zeitraum", 90); list_col(5, L"Beurteilung", 130);
         mk(L"BUTTON", L"Tagesdiagramm öffnen", BS_PUSHBUTTON, 10, 0, 200, 28, IDC_DAYPLOT, 0);
         mk(L"BUTTON", L"Ereignisliste (CSV) öffnen", BS_PUSHBUTTON, 220, 0, 200, 28, IDC_CSV, 0);
         /* Geräte */
@@ -408,7 +406,6 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
         ini_get(L"post", L"3", t, 60); SetWindowTextW(g_post, t);
         ini_get(L"limn", L"42", t, 60); SetWindowTextW(g_limn, t);
         ini_get(L"limd", L"55", t, 60); SetWindowTextW(g_limd, t);
-        ini_get(L"onlydoor", L"0", t, 8); SendMessageW(g_onlydoor, BM_SETCHECK, t[0] == L'1' ? BST_CHECKED : BST_UNCHECKED, 0);
         SetTimer(h, IDC_TIMER, 200, NULL);
         refresh_status();
         return 0; }

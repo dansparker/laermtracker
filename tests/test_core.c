@@ -192,19 +192,18 @@ int main(int argc, char **argv)
         char *fld[16]; int nf = 0; fld[nf++] = line;
         for (char *p = line; *p; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
         if (nf < 15 || line[0] != '2') continue;
-        const char *tm = fld[1], *zr = fld[2], *cls = fld[3];
-        double act = atof(fld[4]), laeq = atof(fld[5]), lafmax = atof(fld[6]), lpk = atof(fld[7]), lae = atof(fld[8]), bg = atof(fld[9]);
-        double lim = atof(fld[10]), ueber = atof(fld[11]); int dist = atoi(fld[12]);
+        const char *tm = fld[1], *zr = fld[2];
+        double act = atof(fld[3]), laeq = atof(fld[4]), lafmax = atof(fld[5]), lpk = atof(fld[6]), lae = atof(fld[7]), bg = atof(fld[8]);
+        double lim = atof(fld[9]), ueber = atof(fld[10]); int dist = atoi(fld[11]);
         int hh, mm, ss, ms; sscanf(tm, "%d:%d:%d.%d", &hh, &mm, &ss, &ms);
         double ta = hh * 3600 + mm * 60 + ss + ms / 1000.0 - (21 * 3600 + 59 * 60 + 30);   /* Ausloesezeit */
-        printf("Zeile %d: %s %s %s %s aktiv %.2fs LAeq %.1f LAFmax %.1f Lpeak %.1f LAE %.1f bg %.1f Grenzwert %.1f (%+.1f) Stoerung %d\n",
-               row, fld[0], tm, zr, cls, act, laeq, lafmax, lpk, lae, bg, lim, ueber, dist);
+        printf("Zeile %d: %s %s %s aktiv %.2fs LAeq %.1f LAFmax %.1f Lpeak %.1f LAE %.1f bg %.1f Grenzwert %.1f (%+.1f) Stoerung %d\n",
+               row, fld[0], tm, zr, act, laeq, lafmax, lpk, lae, bg, lim, ueber, dist);
         if (row >= 4) { row++; continue; }
         double tb = ta + act;
         CHECK(!strcmp(zr, exp_[row].zr), "Zeitraum %s (erwartet %s)", zr, exp_[row].zr);
         CHECK(dist == exp_[row].dist && fabs(ueber - (lafmax - lim)) < 0.11 && fabs(lim - (!strcmp(zr, "NACHT") ? 42.0 : 55.0)) < 0.01,
               "Stoerung=%d (erwartet %d), Grenzwert %.1f, Ueberschreitung %+.1f dB", dist, exp_[row].dist, lim, ueber);
-        CHECK(!strcmp(cls, exp_[row].cls), "Klasse %s (erwartet %s)", cls, exp_[row].cls);
         CHECK(ta > exp_[row].t0 - 0.3 && ta < exp_[row].t1, "Beginn %.2f s im Fenster [%.1f, %.1f]", ta, exp_[row].t0 - 0.3, exp_[row].t1);
         double wa = exp_[row].t0 - 0.2, wb = exp_[row].t1 + 4.0;
         double rlf = ref_lafmax(wa, wb), rlp = ref_lpeak(wa, wb), rle = ref_laeq(ta, tb);

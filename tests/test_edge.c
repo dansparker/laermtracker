@@ -54,7 +54,6 @@ static int io_seek(void *u, void *h, uint32_t p) { (void)u; return fseek((FILE *
 static int io_close(void *u, void *h) { (void)u; return fclose((FILE *)h); }
 static int32_t io_read(void *u, void *h, void *b, uint32_t n) { (void)u; return (int32_t)fread(b, 1, n, (FILE *)h); }
 static int io_remove(void *u, const char *p) { (void)u; char b[400]; full(b, sizeof b, p); return remove(b); }
-static int g_keep_sonst = 1;
 static float g_hpf = 0.0f;
 
 static int64_t days_from_civil(int y, int m, int d)
@@ -111,7 +110,7 @@ static void run_sim(const char *name, const sim_t *o, burst_t *b, int n_b, int64
     bg_dba = bg; bg_mod_db = mod; sig_bg = sigma_for(bg); rng = 7; g_pushed = 0; g_base = base;
     nc_config_t cfg; nc_default_config(&cfg);
     nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
-    cfg.keep_sonst = (uint8_t)g_keep_sonst; cfg.wav_hpf_hz = g_hpf;
+    cfg.wav_hpf_hz = g_hpf;
     nc_init(&g_nc, &cfg, &io, g_ring, RING);
     if (o->wrap_offset) { g_nc.wr = g_nc.M - o->wrap_offset; g_nc.widx = g_nc.wr % g_nc.ring_len; }
     static int32_t blk[256];
@@ -149,7 +148,7 @@ static int csv_col(int row, int col, char *out, size_t sz)
     }
     fclose(f); return -1;
 }
-static int csv_file(int row, char *out, size_t sz) { return csv_col(row, 13, out, sz); }
+static int csv_file(int row, char *out, size_t sz) { return csv_col(row, 12, out, sz); }
 
 /* WAV-Daten == Eingang? (Versatz wird gesucht) */
 static void check_bitexact(const int32_t *rec, uint64_t nrec, double around_s, const char *label)
@@ -235,18 +234,10 @@ int main(int argc, char **argv)
       char p[400]; snprintf(p, sizeof p, "%s/261003/TAG.SVG", g_cur); FILE *f = fopen(p, "rb"); char *buf = calloc(1, 400000); size_t n = f ? fread(buf, 1, 399999, f) : 0; if (f) fclose(f);
       CHECK(n > 0 && strstr(buf, "ersten Ereignisse") != NULL && strstr(buf, "300 Ereignisse") != NULL, "Tagesplot nennt 300 Ereignisse und den Hinweis auf die Begrenzung (%zu Bytes)", n); free(buf); }
 
-    printf("T9: keep_sonst=0 - abrupte Tuer bleibt, langsam anschwellendes Geraeusch (SONST) wird geloescht\n");
-    { static burst_t b[2]; b[0] = (burst_t){ 3.0, 0.5, 78.0, 0.08, 0, 0 }; b[1] = (burst_t){ 15.0, 3.0, 66.0, 2.0, 0, 1.0 }; sim_t o = { 25, 0, 0, NULL, 0 };
-      g_keep_sonst = 0; run_sim("t9", &o, b, 2, B, 33.0, 0.0); g_keep_sonst = 1;
-      CHECK(g_nc.events_total == 1 && g_nc.events_dropped == 1 && count_rows("/EVENTS.CSV") == 1,
-            "gespeichert %lu, verworfen %lu, CSV-Zeilen %d", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped, count_rows("/EVENTS.CSV"));
-      char rel[64]; csv_file(0, rel, sizeof rel);
-      CHECK(strstr(rel, ".WAV") != NULL && file_size(rel) > 654 && g_nc.io_errors == 0, "WAV des Tuergeraeusches vorhanden (%ld Bytes), Schreibfehler %lu", file_size(rel), (unsigned long)g_nc.io_errors); }
-
     printf("T10: Klatschen bei 5 s, jeder SD-Schreibzugriff erzeugt 66 dB(A) Schaltrauschen (60 s Simulation)\n");
     { static burst_t b[1]; b[0] = (burst_t){ 5.0, 0.8, 78.0, 0.10, 0, 0 }; sim_t o = { 60, 0, 0, NULL, 0 };
       g_inject = 1; run_sim("t10", &o, b, 1, B, 33.0, 0.0); g_inject = 0;
-      char act[32] = "99"; csv_col(0, 4, act, sizeof act);
+      char act[32] = "99"; csv_col(0, 3, act, sizeof act);
       CHECK(g_nc.events_total == 1, "genau 1 Ereignis, keine Selbstausloesung durch Schreibrauschen (erkannt: %lu)", (unsigned long)g_nc.events_total);
       CHECK(atof(act) < 4.0, "Ereignis endet rechtzeitig (aktive Dauer %s s)", act); }
 

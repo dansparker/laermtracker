@@ -9,13 +9,13 @@ def check(ok, msg):
     print(("  [OK ] " if ok else "  [FAIL] ") + msg); bad += not ok
 rows = [r.split(";") for r in open(os.path.join(out, "EVENTS.CSV"), encoding="utf-8").read().strip().splitlines()]
 head, ev = rows[0], rows[1:]
-check(len(head) == 16 and len(ev) == 3, f"EVENTS.CSV: {len(ev)} Ereignisse, {len(head)} Spalten (erwartet 3 / 16)")
+check(len(head) == 15 and len(ev) == 3, f"EVENTS.CSV: {len(ev)} Ereignisse, {len(head)} Spalten (erwartet 3 / 15)")
 if len(ev) == 3:
-    cls = [r[3] for r in ev]; laf = [float(r[6]) for r in ev]; zr = [r[2] for r in ev]; st = [r[12] for r in ev]
-    check(cls == ["TUER", "KNALL", "KNALL"], f"Klassen {cls}")
+    laf = [float(r[5]) for r in ev]; zr = [r[2] for r in ev]; st = [r[11] for r in ev]
+    check("typ" not in head, "keine Spalte 'typ' mehr")
     check(50 <= laf[0] < 75 and laf[1] > 75 and laf[2] > 75, f"LAFmax {laf}")
     check(zr == ["TAG", "TAG", "NACHT"], f"Zeitraum {zr} (Uhr lief ab 21:59:30)")
-    check(st[1] == "1" and st[2] == "1", f"Stoerung bei Knall {st}")
+    check(st[1] == "1" and st[2] == "1", f"Stoerung bei den lauten Ereignissen {st}")
     check([r[0] for r in ev] == ["2026-10-03"] * 3, "Datum aus --start uebernommen")
 wavs = sorted(glob.glob(os.path.join(out, "*", "2[12]*.WAV")))
 check(len(wavs) == 3, f"{len(wavs)} WAV-Dateien")

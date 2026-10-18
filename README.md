@@ -24,14 +24,14 @@ ungetestet auf dem echten Board. Rückmeldungen/Issues sind willkommen.
     plus Cue-Marker „Auslösung“, „LAFmax“, „Ende Aktivität“ (in Audacity/Reaper sichtbar)
   - `/YYMMDD/HHMMSS.SVG` – Pegel-Zeit-Plot (LAF, 125 ms; Max je 100 ms) mit LAeq-Linie, LAFmax-Marke
   - `/YYMMDD/TAG.SVG` – **Tagesdiagramm**: alle Ereignisse des Tages über der Uhrzeit (Höhe = LAFmax, Fuß =
-    Hintergrundpegel, Form = Tür/Knall/Sonstiges), Nachtzeit blau hinterlegt, Grenzwertlinien, Störungen rot;
+    Hintergrundpegel, ein Punkt = ein Ereignis), Nachtzeit blau hinterlegt, Grenzwertlinien, Störungen rot;
     wird nach jedem Ereignis aus `/YYMMDD/TAG.CSV` neu erzeugt
   - `/EVENTS.CSV` (alle Tage) und `/YYMMDD/TAG.CSV` (ein Tag) –
-    `datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe`
+    `datum;zeit;zeitraum;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe;schreibfehler`
     (`zeit` = Auslösezeitpunkt, `stoerung` = 1/0)
-- Einstufung (Heuristik, Schwellen in `fw/Inc/config.h`):
-  `KNALL` (LAFmax ≥ 75 dB(A)), `TUER` (impulshafter Anstieg ≥ 10 dB innerhalb 10 ms), sonst `SONST`
-  (z. B. Stimmen, Staubsauger). Es wird keine Geräuschquelle „erkannt“, nur Impulshaltigkeit und Pegel.
+- Es wird **keine Geräuschart** bestimmt (Tür, Knall, Stimme …), nur Pegel und Zeit. Jedes Ereignis, das die Auslöseschwelle überschreitet,
+  wird gespeichert; ob es eine Störung ist, entscheidet allein der LAFmax gegen den Grenzwert (siehe unten).
+  Alte Dateien mit einer Spalte `typ` werden von GUI und Tagesdiagramm weiterhin gelesen.
 
 ## Was gilt als „Lärmstörung“?
 Es gibt **keinen einzelnen gesetzlichen Amplitudenwert** für Türgeräusche in der Wohnung; Gerichte/Gutachter
@@ -107,7 +107,7 @@ laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe  
 - **Linux:** `sudo apt install libasound2-dev && make -C pc`, Eingang über ALSA (`--device default` oder `plughw:1,0`).
 - **Nachträglich korrigieren (ohne Kalibrator):** Handy-Schallpegelmesser neben das Mikrofon legen, gleichmäßiges Rauschen abspielen und den Unterschied
   im Feld „Korrektur [dB]“ eintragen. „Vorhandene Aufnahmen umrechnen …“ (oder `laermtracker --recalibrate dB --out ORDNER`) rechnet alle bisherigen
-  Ergebnisse um: CSV, Ereignis- und Tagesdiagramme, Störungen und Knall-Einstufung werden neu bewertet. Das Original bleibt als `EVENTS_ALT.CSV`,
+  Ergebnisse um: CSV, Ereignis- und Tagesdiagramme, Störungen werden neu bewertet. Das Original bleibt als `EVENTS_ALT.CSV`,
   jede Anwendung steht in `KORREKTUR.LOG`. Nur einmal je Korrektur anwenden.
 - **Wichtig:** Ein USB-Mikrofon hat eine unbekannte Empfindlichkeit. Ohne `--calibrate`/`--sens` sind die dB-Werte nur Schätzungen.
   Automatische Verstärkung (AGC) und „Klangverbesserungen“ in den Systemeinstellungen abschalten, sonst sind die Pegel unbrauchbar.

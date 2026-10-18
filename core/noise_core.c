@@ -132,13 +132,10 @@ void nc_default_config(nc_config_t *c)
     c->pre_ms = 1000;
     c->post_ms = 3000;
     c->max_event_ms = 60000;
-    c->slam_lafmax_dba = 75.0f;
-    c->impulse_rise_db = 10.0f;
     c->night_start_h = 22;
     c->night_end_h = 6;
     c->lim_night_dba = 42.0f;
     c->lim_day_dba = 55.0f;
-    c->keep_sonst = 1;
     c->wav_hpf_hz = 0.0f;
 }
 
@@ -266,14 +263,7 @@ static void tstr(char *out, size_t sz, int64_t ms)
     snprintf(out, sz, "%02d:%02d:%02d.%03d", h, mi, s, m);
 }
 
-static const char *classify(const nc_t *n)
-{
-    if (n->ev_lafmax >= n->cfg.slam_lafmax_dba) return "KNALL";
-    if (n->ev_rise >= n->cfg.impulse_rise_db) return "TUER";
-    return "SONST";
-}
-
-static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, float lae,
+static void write_svg(nc_t *n, const char *path, float laeq, float lae,
                       int y, int mo, int d, int h, int mi, int s)
 {
     void *f = n->io.open(n->io.user, path, 'w');
@@ -299,8 +289,8 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
     io_printf(n, f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" "
               "width=\"900\" height=\"460\" viewBox=\"0 0 900 460\" font-family=\"sans-serif\" font-size=\"12\">\n"
               "<rect width=\"900\" height=\"460\" fill=\"#fff\"/>\n");
-    io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\" fill=\"%s\">%sLärmereignis %s – %04d-%02d-%02d %02d:%02d:%02d</text>\n",
-              X0, n->ev_dist ? "#c00" : "#000", n->ev_dist ? "STÖRUNG – " : "", cls, y, mo, d, h, mi, s);
+    io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\" fill=\"%s\">%sLärmereignis – %04d-%02d-%02d %02d:%02d:%02d</text>\n",
+              X0, n->ev_dist ? "#c00" : "#000", n->ev_dist ? "STÖRUNG – " : "", y, mo, d, h, mi, s);
     { char lm[16], ov[16]; fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
       io_printf(n, f, "<text x=\"%d\" y=\"64\" fill=\"%s\">Grenzwert %s: LAFmax ≥ %s dB(A) – Messwert %s dB(A), %s dB %s Grenzwert</text>\n",
                 X0, n->ev_dist ? "#c00" : "#2a7a2a", n->ev_night ? "nachts" : "tagsüber", lm, b2, ov, n->ev_dist ? "über" : "unter"); }
@@ -352,7 +342,7 @@ static void write_svg(nc_t *n, const char *path, const char *cls, float laeq, fl
 
 /* ------------------------------------------------- CSV + Tagesdiagramm */
 
-#define CSV_HEAD "datum;zeit;zeitraum;typ;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe;schreibfehler\n"
+#define CSV_HEAD "datum;zeit;zeitraum;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe;schreibfehler\n"
 
 static void csv_append(nc_t *n, const char *path, const char *row)
 {
@@ -376,19 +366,23 @@ static int parse10(const char *p)                           /* "-12.3" -> -123 *
     return neg ? -v : v;
 }
 
+/* Alte Dateien haben an Spalte 3 die Art (TUER/KNALL/SONST); neue nicht. Rueckgabe: Spaltenversatz fuer alle folgenden Spalten. */
+static int csv_off(char *const fld[]) { return (fld[3][0] >= 'A' && fld[3][0] <= 'Z') ? 1 : 0; }
+
 static void day_parse_line(nc_t *n, char *line)
 {
     char *fld[16]; int nf = 0;
     fld[nf++] = line;
     for (char *p = line; *p && nf < 16; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
-    if (nf < 13 || line[0] < '0' || line[0] > '9' || n->day_n >= NC_DAY_MAX || strlen(fld[1]) < 8) return;
+    if (nf < 5 || line[0] < '0' || line[0] > '9' || n->day_n >= NC_DAY_MAX || strlen(fld[1]) < 8) return;
+    int o = csv_off(fld);
+    if (nf < 12 + o) return;
     nc_dayev_t *e = &n->day[n->day_n++];
     const char *t = fld[1];
     e->sod = (uint32_t)(((t[0] - '0') * 10 + (t[1] - '0')) * 3600 + ((t[3] - '0') * 10 + (t[4] - '0')) * 60 + (t[6] - '0') * 10 + (t[7] - '0'));
-    e->cls = fld[3][0] == 'T' ? 0 : (fld[3][0] == 'K' ? 1 : 2);   /* TUER, KNALL, SONST */
-    e->lafmax10 = (int16_t)parse10(fld[6]);
-    e->bg10 = (int16_t)parse10(fld[9]);
-    e->dist = fld[12][0] == '1';
+    e->lafmax10 = (int16_t)parse10(fld[5 + o]);
+    e->bg10 = (int16_t)parse10(fld[8 + o]);
+    e->dist = fld[11 + o][0] == '1';
 }
 
 static void write_day_svg(nc_t *n)
@@ -442,7 +436,7 @@ static void write_day_svg(nc_t *n)
               "<tspan fill=\"#c00\">%lu Störungen</tspan> (nachts %lu, tagsüber %lu)</text>\n", X0, n->dir, n->dir + 2, n->dir + 4,
               (unsigned long)n->day_n, (unsigned long)(ndn + ndd), (unsigned long)ndn, (unsigned long)ndd);
     io_printf(n, f, "<text x=\"%d\" y=\"46\">Markerhöhe = LAFmax, Fuß = Hintergrundpegel · rot = Störung (LAFmax ≥ Grenzwert: nachts %s, tagsüber %s dB(A)) "
-              "· ● Tür ■ Knall ◆ Sonstiges%s</text>\n", X0, lns, lds, n->day_n >= NC_DAY_MAX ? " · nur die ersten Ereignisse dargestellt" : "");
+              "· jeder Punkt = ein Ereignis%s</text>\n", X0, lns, lds, n->day_n >= NC_DAY_MAX ? " · nur die ersten Ereignisse dargestellt" : "");
     for (int i = 0; i < nn; i++)
         io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"#e6ebf4\"/>\n", DX(nseg[i][0] * 3600), Y0,
                   DX(nseg[i][1] * 3600) - DX(nseg[i][0] * 3600), PH);
@@ -469,9 +463,7 @@ static void write_day_svg(nc_t *n)
         int cx = DX(e->sod), yb = DY(bgv), yv = DY(lv);
         const char *col = e->dist ? "#d32f2f" : "#1769aa";
         io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-opacity=\"0.35\" stroke-width=\"2\"/>\n", cx, yb, cx, yv, col);
-        if (e->cls == 0)      io_printf(n, f, "<circle cx=\"%d\" cy=\"%d\" r=\"4.5\" fill=\"%s\"/>\n", cx, yv, col);
-        else if (e->cls == 1) io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"9\" height=\"9\" fill=\"%s\"/>\n", cx - 4, yv - 4, col);
-        else                  io_printf(n, f, "<polygon points=\"%d,%d %d,%d %d,%d %d,%d\" fill=\"%s\"/>\n", cx, yv - 6, cx + 5, yv, cx, yv + 6, cx - 5, yv, col);
+        io_printf(n, f, "<circle cx=\"%d\" cy=\"%d\" r=\"4.5\" fill=\"%s\"/>\n", cx, yv, col);
     }
     io_printf(n, f, "</svg>\n");
     n->io.close(n->io.user, f);
@@ -509,10 +501,9 @@ static void finish_event_inner(nc_t *n)
     uint32_t cn = n->ev_n_snap ? n->ev_n_snap : 1;
     float laeq = 10.0f * log10f((float)(n->ev_sumA_snap / cn) / n->ref_rms2) + NC_REF_SPL_DB + n->cfg.cal_offset_db;
     float lae = laeq + 10.0f * log10f(cn * 0.01f);
-    const char *cls = classify(n);
     char a[16], bb[16], c[16], desc[256];
     fmt1(a, sizeof a, laeq); fmt1(bb, sizeof bb, n->ev_lafmax); fmt1(c, sizeof c, n->ev_lpeak);
-    snprintf(desc, sizeof desc, "%s LAeq=%s dB(A) LAFmax=%s dB(A) Lpeak=%s dB", cls, a, bb, c);
+    snprintf(desc, sizeof desc, "Laermereignis LAeq=%s dB(A) LAFmax=%s dB(A) Lpeak=%s dB", a, bb, c);
     uint32_t total = WAV_DATA_START + n->wav_data_bytes + (uint32_t)(p - b);
     uint8_t hdr[4];
     n->io.seek(n->io.user, n->wav, 4);   put32(hdr, total - 8);              wwrite(n, hdr, 4);
@@ -521,15 +512,6 @@ static void finish_event_inner(nc_t *n)
     n->io.seek(n->io.user, n->wav, WAV_BEXT_DESC); wwrite(n, dz, sizeof dz);
     n->io.close(n->io.user, n->wav);
     n->wav = NULL;
-
-    if (!n->cfg.keep_sonst && cls[0] == 'S' && n->io.remove) {   /* kein Tuergeraeusch: Aufnahme wieder loeschen */
-        char wp[32];
-        snprintf(wp, sizeof wp, "/%s/%s.WAV", n->dir, n->base);
-        n->io.remove(n->io.user, wp);
-        n->events_dropped++;
-        n->state = NC_IDLE;
-        return;
-    }
 
     if (n->bin_cnt) { if (n->plot_n < NC_MAX_PLOT_BINS) n->plot[n->plot_n++] = n->bin_max; n->bin_cnt = 0; }
 
@@ -543,15 +525,15 @@ static void finish_event_inner(nc_t *n)
 
     char path[32];
     snprintf(path, sizeof path, "/%s/%s.SVG", n->dir, n->base);
-    write_svg(n, path, cls, laeq, lae, ty, tmo, td, th, tmi, ts);
+    write_svg(n, path, laeq, lae, ty, tmo, td, th, tmi, ts);
 
     char dur[16], lp[16], bgs[16], lm[16], ov[16], row[256];
     uint32_t cs = n->ev_last_L + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
     snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
     fmt1(lp, sizeof lp, lae); fmt1(bgs, sizeof bgs, n->ev_bg);
     fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
-    snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu;%lu\n",
-             ty, tmo, td, th, tmi, ts, tms, night ? "NACHT" : "TAG", cls, dur, a, bb, c, lp, bgs, lm, ov, dist,
+    snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu;%lu\n",
+             ty, tmo, td, th, tmi, ts, tms, night ? "NACHT" : "TAG", dur, a, bb, c, lp, bgs, lm, ov, dist,
              n->dir, n->base, (unsigned long)n->overruns, (unsigned long)n->io_errors);
     csv_append(n, "/EVENTS.CSV", row);
     snprintf(path, sizeof path, "/%s/TAG.CSV", n->dir);
@@ -588,7 +570,6 @@ static void event_account(nc_t *n, float L, float laf, float laf_act, float lpk,
             n->ev_last_L = idx;
             n->ev_sumA_snap = n->ev_sumA; n->ev_n_snap = n->ev_n;
         }
-        if (L - n->prev_db > n->ev_rise) n->ev_rise = L - n->prev_db;
     }
     if (laf > n->ev_lafmax) { n->ev_lafmax = laf; n->ev_lafmax_frame = idx; }
     if (lpk > n->ev_lpeak) n->ev_lpeak = lpk;
@@ -628,7 +609,7 @@ static void start_event_inner(nc_t *n, float L, float laf, float lpk, double mea
     n->ev_trig_frame = pre;
     n->ev_last_active = pre; n->ev_last_L = pre;
     n->ev_sumA = 0; n->ev_n = 0; n->ev_sumA_snap = 0; n->ev_n_snap = 0;
-    n->ev_lafmax = -999; n->ev_lpeak = -999; n->ev_rise = -999;
+    n->ev_lafmax = -999; n->ev_lpeak = -999;
     n->ev_bg = n->bg_db;
     event_account(n, L, laf, laf, lpk, meansq, pre, 0);
 }
@@ -741,8 +722,7 @@ void nc_flush(nc_t *n)
 /* ------------------------------------------------------------------------------------------------------------------
  * Nachtraegliche Pegelkorrektur: rechnet vorhandene Ergebnisse (EVENTS.CSV, TAG.CSV, Ereignis- und Tagesplots) um delta_db um.
  * Alle Pegel (LAeq, LAFmax, Lpeak, LAE, Hintergrund) sind linear in der Kalibrierung, verschieben sich also genau um delta_db.
- * Neu bewertet werden daraus abgeleitete Angaben: Ueberschreitung/Stoerung gegen den Grenzwert und KNALL gegen die Knallschwelle
- * (ein bisheriger KNALL, der darunter faellt, wird zu TUER). Die Ereigniskurven werden aus den WAV-Dateien neu berechnet und auf
+ * Neu bewertet werden daraus abgeleitete Angaben: Ueberschreitung/Stoerung gegen den Grenzwert. Die Ereigniskurven werden aus den WAV-Dateien neu berechnet und auf
  * den neuen LAFmax ausgerichtet. Das Original bleibt als /EVENTS_ALT.CSV erhalten; die Aktion wird in /KORREKTUR.LOG vermerkt.
  * ------------------------------------------------------------------------------------------------------------------ */
 
@@ -762,7 +742,7 @@ static int copy_file(nc_t *n, const char *src, const char *dst)
 #define RR_MAX_FRAMES 7400
 
 /* Ereigniskurve (LAF) aus der WAV-Datei neu berechnen und den Plot schreiben */
-static int rerender_event(nc_t *n, const char *wavp, const char *svgp, const char *cls, float laeq, float lae,
+static int rerender_event(nc_t *n, const char *wavp, const char *svgp, float laeq, float lae,
                           int y, int mo, int d, int h, int mi, int s)
 {
     static int16_t lafs[RR_MAX_FRAMES];                       /* LAF je 10-ms-Frame in 0.1 dB (ohne Kalibrierung) */
@@ -817,7 +797,7 @@ static int rerender_event(nc_t *n, const char *wavp, const char *svgp, const cha
         int v = m + align; n->plot[n->plot_n++] = (int16_t)(v < 0 ? 0 : v);
     }
     n->ev_trig_frame = trig; n->ev_lafmax_frame = mx;
-    write_svg(n, svgp, cls, laeq, lae, y, mo, d, h, mi, s);
+    write_svg(n, svgp, laeq, lae, y, mo, d, h, mi, s);
     return 0;
 }
 
@@ -827,16 +807,17 @@ static void recal_line(nc_t *n, const char *line, float delta, nc_recal_t *res, 
     char buf[512]; snprintf(buf, sizeof buf, "%s", line);
     char *fld[17]; int nf = 0; fld[nf++] = buf;
     for (char *p = buf; *p && nf < 17; p++) if (*p == ';') { *p = 0; fld[nf++] = p + 1; }
-    if (nf < 15 || strlen(fld[13]) < 12) { res->skipped++; return; }
-    float laeq = parse10(fld[5]) / 10.0f + delta, lafmax = parse10(fld[6]) / 10.0f + delta, lpk = parse10(fld[7]) / 10.0f + delta;
-    float lae = parse10(fld[8]) / 10.0f + delta, bg = parse10(fld[9]) / 10.0f + delta, lim = parse10(fld[10]) / 10.0f;
+    if (nf < 5) { res->skipped++; return; }
+    int o = csv_off(fld);                                       /* 1 bei alten Dateien mit Spalte "typ" (wird entfernt) */
+    if (nf < 14 + o || strlen(fld[12 + o]) < 12) { res->skipped++; return; }
+    float laeq = parse10(fld[4 + o]) / 10.0f + delta, lafmax = parse10(fld[5 + o]) / 10.0f + delta, lpk = parse10(fld[6 + o]) / 10.0f + delta;
+    float lae = parse10(fld[7 + o]) / 10.0f + delta, bg = parse10(fld[8 + o]) / 10.0f + delta, lim = parse10(fld[9 + o]) / 10.0f;
     float over = lafmax - lim; int dist = over >= 0.0f;
-    const char *cls = lafmax >= n->cfg.slam_lafmax_dba ? "KNALL" : (!strcmp(fld[3], "KNALL") ? "TUER" : fld[3]);
     char a[16], b[16], c[16], dd[16], e[16], ov[16], row[400];
     fmt1(a, sizeof a, laeq); fmt1(b, sizeof b, lafmax); fmt1(c, sizeof c, lpk); fmt1(dd, sizeof dd, lae); fmt1(e, sizeof e, bg); fmt1(ov, sizeof ov, over);
-    snprintf(row, sizeof row, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;%s;%s;%s\n", fld[0], fld[1], fld[2], cls, fld[4], a, b, c, dd, e, fld[10], ov,
-             dist, fld[13], fld[14], nf > 15 ? fld[15] : "0");
-    char day[8] = {0}; snprintf(day, sizeof day, "%.6s", fld[13] + 1);
+    snprintf(row, sizeof row, "%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;%s;%s;%s\n", fld[0], fld[1], fld[2], fld[3 + o], a, b, c, dd, e, fld[9 + o], ov,
+             dist, fld[12 + o], fld[13 + o], nf > 14 + o ? fld[14 + o] : "0");
+    char day[8] = {0}; snprintf(day, sizeof day, "%.6s", fld[12 + o] + 1);
     int seen = 0;
     for (uint32_t i = 0; i < *nd; i++) if (!strcmp(days[i], day)) seen = 1;
     char tagnew[32]; snprintf(tagnew, sizeof tagnew, "/%.6s/TAG.NEU", day);
@@ -844,11 +825,11 @@ static void recal_line(nc_t *n, const char *line, float delta, nc_recal_t *res, 
     csv_append(n, "/EVENTS.NEU", row);
     csv_append(n, tagnew, row);
     res->rows++;
-    char wavp[48], svgp[48]; snprintf(wavp, sizeof wavp, "%.40s", fld[13]); snprintf(svgp, sizeof svgp, "%.40s", fld[13]);
+    char wavp[48], svgp[48]; snprintf(wavp, sizeof wavp, "%.40s", fld[12 + o]); snprintf(svgp, sizeof svgp, "%.40s", fld[12 + o]);
     size_t l = strlen(svgp); memcpy(svgp + l - 3, "SVG", 3);
     n->ev_night = !strcmp(fld[2], "NACHT"); n->ev_limit = lim; n->ev_dist = (uint8_t)dist;
     n->ev_bg = bg; n->ev_lpeak = lpk; n->ev_lafmax = lafmax;
-    if (rerender_event(n, wavp, svgp, cls, laeq, lae, atoi(fld[0]), atoi(fld[0] + 5), atoi(fld[0] + 8), atoi(fld[1]), atoi(fld[1] + 3), atoi(fld[1] + 6)) == 0)
+    if (rerender_event(n, wavp, svgp, laeq, lae, atoi(fld[0]), atoi(fld[0] + 5), atoi(fld[0] + 8), atoi(fld[1]), atoi(fld[1] + 3), atoi(fld[1] + 6)) == 0)
         res->svgs++;
 }
 

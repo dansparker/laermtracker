@@ -16,9 +16,7 @@
 #define TRIG_MIN_DBA       50.0f
 #define PRE_MS             1000u
 #define POST_MS            3000u
-#define SLAM_LAFMAX_DBA    75.0f
 #define WAV_HPF_HZ         0.0f     /* >0: Hochpass (Hz) auf die gespeicherte WAV (entfernt DC und SD-Schreibwummern); 0 = Rohdaten */
-#define KEEP_SONST         0        /* 0 = nur impulshafte Ereignisse (Tuer/Knall) behalten, Stimmen/Brummen verwerfen */
 
 /* Stoerungskriterium: LAFmax >= Grenzwert (Innenraum am Mikrofon), Zeiten lokal */
 #define NIGHT_START_H      22

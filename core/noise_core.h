@@ -32,14 +32,11 @@ typedef struct {
     uint32_t pre_ms;           /* Vorlauf (wird auf 100 ms gerundet)               */
     uint32_t post_ms;          /* Nachlauf nach letztem Geraeusch                  */
     uint32_t max_event_ms;     /* harte Obergrenze je Ereignis                     */
-    float    slam_lafmax_dba;  /* LAFmax >= Wert  => Klasse KNALL                  */
-    float    impulse_rise_db;  /* Anstieg >= Wert in 10 ms => impulshaft (TUER)    */
     /* Stoerungskriterium: LAFmax >= zeitabhaengiger Grenzwert (Innenraum, am Mikrofon) */
     uint8_t  night_start_h;    /* Nachtzeit ab (Stunde, lokal)                     */
     uint8_t  night_end_h;      /* Nachtzeit bis                                    */
     float    lim_night_dba;    /* Grenzwert nachts (WHO 2009: 42 dB LAmax innen)   */
     float    lim_day_dba;      /* Grenzwert tags (eigene Annahme, anpassbar)       */
-    uint8_t  keep_sonst;       /* 0 = nicht impulshafte Ereignisse (SONST) wieder loeschen */
     float    wav_hpf_hz;       /* >0: Hochpass 2. Ordnung auf die gespeicherte WAV (entfernt DC-Offset und SD-Schreib-Wummern), 0 = Rohdaten */
 } nc_config_t;
 
@@ -68,7 +65,7 @@ typedef struct { float meansq; float peak; uint32_t pos; } nc_frame_t;
 #define NC_BLK     8      /* Sperrbereiche (SD-Zugriffe), die noch nicht ausgewertet wurden */
 
 /* Ereignis im Tagesdiagramm */
-typedef struct { uint32_t sod; int16_t lafmax10, bg10; uint8_t cls, dist; } nc_dayev_t;
+typedef struct { uint32_t sod; int16_t lafmax10, bg10; uint8_t dist; } nc_dayev_t;
 
 typedef enum { NC_IDLE = 0, NC_ACTIVE = 1 } nc_state_t;
 
@@ -125,7 +122,7 @@ typedef struct {
     double      ev_sumA_snap;       /* Stand beim letzten aktiven Frame */
     uint32_t    ev_n_snap;
     float       ev_bg;              /* Hintergrundpegel bei Ausloesung */
-    float       ev_lafmax, ev_lpeak, ev_rise;
+    float       ev_lafmax, ev_lpeak;
     uint32_t    ev_lafmax_frame;
     int16_t     plot[NC_MAX_PLOT_BINS]; /* 0.1 dB, Max je 100 ms */
     uint32_t    plot_n;
@@ -140,7 +137,6 @@ typedef struct {
     float       hp_b[3], hp_a[2];   /* WAV-Hochpass: Koeffizienten (Direktform 1) */
     float       hp_x1, hp_x2, hp_y1, hp_y2;
     uint8_t     hp_prime;           /* Zustand beim naechsten Sample auf den Gleichanteil setzen */
-    uint32_t    events_dropped;     /* verworfene SONST-Ereignisse (keep_sonst = 0) */
     uint32_t    blk_from[NC_BLK], blk_to[NC_BLK], blk_n;   /* Samplebereiche waehrend SD-Zugriffen: Stoergeraeusche, nicht auswerten */
     float       ev_limit;           /* Grenzwert des laufenden Ereignisses */
     uint8_t     ev_dist, ev_night;  /* Stoerung? / Nachtzeit? */

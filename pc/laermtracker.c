@@ -118,7 +118,7 @@ static int last_csv_fields(char *buf, size_t sz, char *fld[], int max)
 /* Wird nach jedem Audioblock aufgerufen: meldet Ausloesung, gespeicherte/verworfene Ereignisse und (periodisch) den Pegel */
 static void ui_tick(void)
 {
-    static uint32_t seen_t, seen_d; static int was_active; static uint64_t last_ms;
+    static uint32_t seen_t; static int was_active; static uint64_t last_ms;
     const char *nl = g_log_lines ? "" : "\n";                               /* Statuszeile nicht ueberschreiben */
     char ts[16];
     int act = g_nc.state == NC_ACTIVE;
@@ -130,13 +130,13 @@ static void ui_tick(void)
     if (g_nc.events_total != seen_t) {
         seen_t = g_nc.events_total;
         char buf[1024]; char *f[16]; int nf = last_csv_fields(buf, sizeof buf, f, 16);
-        if (nf >= 14) {
+        int o = nf > 3 && f[3][0] >= 'A' && f[3][0] <= 'Z';                  /* alte Dateien: Spalte "typ" */
+        if (nf >= 13 + o) {
             char st[64] = "";
-            if (!strcmp(f[12], "1")) snprintf(st, sizeof st, "  [STOERUNG: %s dB ueber Grenzwert]", f[11]);
-            printf("%s[%.8s] Ereignis gespeichert: %s, LAFmax %s dB(A), LAeq %s dB(A), %s s aktiv%s -> %s\n", nl, f[1], f[3], f[6], f[5], f[4], st, f[13]);
+            if (!strcmp(f[11 + o], "1")) snprintf(st, sizeof st, "  [STOERUNG: %s dB ueber Grenzwert]", f[10 + o]);
+            printf("%s[%.8s] Ereignis gespeichert: LAFmax %s dB(A), LAeq %s dB(A), %s s aktiv%s -> %s\n", nl, f[1], f[5 + o], f[4 + o], f[3 + o], st, f[12 + o]);
         } else printf("%s[Ereignis gespeichert] %s" PSEP "%s.WAV\n", nl, g_nc.dir, g_nc.base);
     }
-    if (g_nc.events_dropped != seen_d) { seen_d = g_nc.events_dropped; printf("%s[Ereignis verworfen: nicht impulshaft]\n", nl); }
     if (g_status_ms > 0) {
         uint64_t ms = g_pushed * 1000ull / g_fs;
         if (ms - last_ms >= (uint64_t)g_status_ms) {
@@ -329,9 +329,8 @@ int main(int argc, char **argv)
                "  --threshold dBA         fester Ausloesepegel (wie --trig-min dBA --trig-delta 0); Ausloesung ab diesem LAeq(10 ms) in dB(A)\n"
                "  --status-s N            Pegelanzeige alle N Sekunden (0 = aus, Standard 1)\n"
                "  --log                   zeilenweise Ausgabe mit Uhrzeit statt ueberschreibender Zeile (systemd, Logdateien)\n"
-               "  --slam dBA (75)  --night-start h (22)  --night-end h (6)  --lim-night dBA (42)  --lim-day dBA (55)\n"
+               "  --night-start h (22)  --night-end h (6)  --lim-night dBA (42)  --lim-day dBA (55)\n"
                "  --recalibrate dB        vorhandene Ergebnisse im --out-Ordner nachtraeglich um dB korrigieren (CSV, Plots, Stoerungen neu; Original: EVENTS_ALT.CSV)\n"
-               "  --keep-sonst 0|1        nicht impulshafte Ereignisse (Stimmen, Brummen) behalten (Standard 1)\n"
                "Hinweis: Automatische Verstaerkung (AGC) und Klangverbesserungen des Mikrofons in den Windows-Soundeinstellungen\n"
                "abschalten, sonst sind die Pegel unbrauchbar.\n");
         return 0;
@@ -367,12 +366,10 @@ int main(int argc, char **argv)
     cfg.pre_ms = (uint32_t)optd("--pre-ms", cfg.pre_ms);
     cfg.post_ms = (uint32_t)optd("--post-ms", cfg.post_ms);
     cfg.max_event_ms = (uint32_t)optd("--max-ms", cfg.max_event_ms);
-    cfg.slam_lafmax_dba = (float)optd("--slam", cfg.slam_lafmax_dba);
     cfg.night_start_h = (uint8_t)optd("--night-start", cfg.night_start_h);
     cfg.night_end_h = (uint8_t)optd("--night-end", cfg.night_end_h);
     cfg.lim_night_dba = (float)optd("--lim-night", cfg.lim_night_dba);
     cfg.lim_day_dba = (float)optd("--lim-day", cfg.lim_day_dba);
-    cfg.keep_sonst = (uint8_t)optd("--keep-sonst", 1);
     if (opt("--threshold")) { cfg.trig_min_dba = (float)optd("--threshold", 50); cfg.trig_delta_db = 0.0f; }   /* fester Ausloesepegel */
     g_status_ms = (int)(optd("--status-s", 1.0) * 1000.0); g_log_lines = flag("--log");
 
@@ -400,7 +397,7 @@ int main(int argc, char **argv)
             feed(wav + i, m); ui_tick();
         }
         nc_flush(&g_nc); ui_tick();
-        printf("Fertig. Gespeichert: %lu, verworfen: %lu. Ausgabe in %s\n", (unsigned long)g_nc.events_total, (unsigned long)g_nc.events_dropped, g_out);
+        printf("Fertig. Gespeichert: %lu. Ausgabe in %s\n", (unsigned long)g_nc.events_total, g_out);
         free(wav); free(ring);
         return 0;
     }
