@@ -1,0 +1,23 @@
+im Ordner laermtracker:
+./pc/laermtracker --device default --sens -32 --threshold 58 --out ~/laermtracker-daten
+
+
+auch bei ssh-unterbrechung:
+nohup ./pc/laermtracker --device default --sens -32 --threshold 58 --out ~/laermtracker-daten --log > ~/laermtracker.log 2>&1 &
+tail -f ~/laermtracker.log
+
+
+#läuft noch etwas?
+pgrep -a laermtracker
+
+sudo systemctl stop laermtracker     # wenn als Dienst gestartet
+pkill laermtracker                   # direkt gestarteter Prozess
+
+entfernen:
+sudo rm -rf ~/laermtracker.log
+sudo rm -rf ~/laermtracker-daten
+
+Brauchst du die Daten noch, kopiere sie vorher auf deinen PC: 
+rsync -av daniel@ubuntuserver:~/laermtracker-daten D:\Dokumente\ClaudeCode\lärmtracker\dist\pc\laerm
+Geht nur mit PowerShell in Windows:
+scp -r daniel@192.168.178.92:~/laermtracker-daten "D:\Dokumente\ClaudeCode\lärmtracker\dist\pc\laerm"

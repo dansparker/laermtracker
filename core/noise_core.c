@@ -463,7 +463,10 @@ static void write_day_svg(nc_t *n)
                   DX(dseg[i][0] * 3600), DY(ld), DX(dseg[i][1] * 3600), DY(ld));
     for (uint32_t i = 0; i < n->day_n; i++) {
         const nc_dayev_t *e = &n->day[i];
-        int cx = DX(e->sod), yb = DY(e->bg10 / 10.0f), yv = DY(e->lafmax10 / 10.0f);
+        float bgv = e->bg10 / 10.0f, lv = e->lafmax10 / 10.0f;         /* Werte unter dem Diagrammrand am Rand abschneiden (CSV behaelt den echten Wert) */
+        if (bgv < (float)ymin) bgv = (float)ymin;
+        if (lv < (float)ymin) lv = (float)ymin;
+        int cx = DX(e->sod), yb = DY(bgv), yv = DY(lv);
         const char *col = e->dist ? "#d32f2f" : "#1769aa";
         io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"%s\" stroke-opacity=\"0.35\" stroke-width=\"2\"/>\n", cx, yb, cx, yv, col);
         if (e->cls == 0)      io_printf(n, f, "<circle cx=\"%d\" cy=\"%d\" r=\"4.5\" fill=\"%s\"/>\n", cx, yv, col);
