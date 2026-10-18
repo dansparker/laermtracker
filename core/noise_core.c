@@ -422,7 +422,7 @@ static void write_day_svg(nc_t *n)
     int ymin = (int)floorf((lo - 5.0f) / 10.0f) * 10, ymax = (int)ceilf((hi + 2.0f) / 10.0f) * 10;
     if (ymin < 0) ymin = 0;
     if (ymax - ymin < 30) ymax = ymin + 30;
-    const int X0 = 70, Y0 = 84, PW = 900, PH = 300;
+    const int X0 = 70, Y0 = 84, PW = 1880, PH = 300;           /* 78 Pixel je Stunde */
     #define DX(sec) (X0 + (int)((float)PW * (float)(sec) / 86400.0f))
     #define DY(v)   (Y0 + PH - (int)((float)PH * ((v) - (float)ymin) / (float)(ymax - ymin)))
     int nseg[2][2], dseg[2][2], nn = 0, nd = 0;
@@ -434,8 +434,8 @@ static void write_day_svg(nc_t *n)
     if (!f) return;
     char lns[16], lds[16];
     fmt1(lns, sizeof lns, ln); fmt1(lds, sizeof lds, ld);
-    io_printf(n, f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1000\" height=\"470\" "
-              "viewBox=\"0 0 1000 470\" font-family=\"sans-serif\" font-size=\"12\">\n<rect width=\"1000\" height=\"470\" fill=\"#fff\"/>\n");
+    io_printf(n, f, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2000\" height=\"470\" "
+              "viewBox=\"0 0 2000 470\" font-family=\"sans-serif\" font-size=\"12\">\n<rect width=\"2000\" height=\"470\" fill=\"#fff\"/>\n");
     io_printf(n, f, "<text x=\"%d\" y=\"26\" font-size=\"18\" font-weight=\"bold\">Tagesverlauf 20%.2s-%.2s-%.2s – %lu Ereignisse, "
               "<tspan fill=\"#c00\">%lu Störungen</tspan> (nachts %lu, tagsüber %lu)</text>\n", X0, n->dir, n->dir + 2, n->dir + 4,
               (unsigned long)n->day_n, (unsigned long)(ndn + ndd), (unsigned long)ndn, (unsigned long)ndd);
@@ -447,7 +447,9 @@ static void write_day_svg(nc_t *n)
     for (int v = ymin; v <= ymax; v += 10)
         io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#ddd\"/><text x=\"%d\" y=\"%d\" text-anchor=\"end\">%d</text>\n",
                   X0, DY((float)v), X0 + PW, DY((float)v), X0 - 6, DY((float)v) + 4, v);
-    for (int hr = 0; hr <= 24; hr += 2)
+    for (int hr = 0; hr < 24; hr++)                                         /* halbe Stunden: feine Hilfslinien */
+        io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#f2f2f2\"/>\n", DX(hr * 3600 + 1800), Y0, DX(hr * 3600 + 1800), Y0 + PH);
+    for (int hr = 0; hr <= 24; hr++)                                        /* jede volle Stunde beschriften */
         io_printf(n, f, "<line x1=\"%d\" y1=\"%d\" x2=\"%d\" y2=\"%d\" stroke=\"#eee\"/><text x=\"%d\" y=\"%d\" text-anchor=\"middle\">%02d:00</text>\n",
                   DX(hr * 3600), Y0, DX(hr * 3600), Y0 + PH, DX(hr * 3600), Y0 + PH + 16, hr);
     io_printf(n, f, "<rect x=\"%d\" y=\"%d\" width=\"%d\" height=\"%d\" fill=\"none\" stroke=\"#444\"/>\n", X0, Y0, PW, PH);
