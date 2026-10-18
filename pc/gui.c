@@ -49,7 +49,7 @@ static int g_sim; static int64_t g_sim_start_ms;
 static wchar_t g_wavin[520];
 static float g_hist[HIST_N]; static uint8_t g_histrec[HIST_N]; static int g_hist_n, g_hist_pos;
 static int g_selftest;
-static uint32_t g_seen_total, g_seen_dropped;
+static uint32_t g_seen_total;
 
 /* ------------------------------------------------------------ Zeichenkonvertierung / Dateien (UTF-8 fuer den Kern) */
 static void u2w(const char *s, wchar_t *o, int n) { MultiByteToWideChar(CP_UTF8, 0, s, -1, o, n); }
@@ -155,7 +155,6 @@ static void post_last_event(void)
 static void check_events(void)
 {
     if (g_nc.events_total != g_seen_total) { g_seen_total = g_nc.events_total; post_last_event(); }
-    g_seen_dropped = g_nc.events_dropped;
 }
 
 /* ------------------------------------------------------------ Arbeits-Thread */
@@ -247,7 +246,7 @@ static int start_job(int mode)
         uint32_t ring_len = g_fs * 4; ring = malloc((size_t)ring_len * 2);
         nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
         nc_init(&g_nc, &cfg, &io, ring, ring_len);
-        g_pushed = 0; g_seen_total = g_seen_dropped = 0; g_hist_n = g_hist_pos = 0;
+        g_pushed = 0; g_seen_total = 0; g_hist_n = g_hist_pos = 0;
     }
     g_stop = 0; InterlockedExchange(&g_running, 1);
     set_controls_enabled(1);
