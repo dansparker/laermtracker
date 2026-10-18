@@ -820,6 +820,7 @@ static void recal_line(nc_t *n, const char *line, float delta, nc_recal_t *res, 
     if (nf < 14 + o || strlen(fld[12 + o]) < 12) { res->skipped++; return; }
     float laeq = parse10(fld[4 + o]) / 10.0f + delta, lafmax = parse10(fld[5 + o]) / 10.0f + delta, lpk = parse10(fld[6 + o]) / 10.0f + delta;
     float lae = parse10(fld[7 + o]) / 10.0f + delta, bg = parse10(fld[8 + o]) / 10.0f + delta, lim = parse10(fld[9 + o]) / 10.0f;
+    if (bg < 0.0f) bg = 0.0f;                                   /* alte Dateien: Pegel unter 0 dB (digitale Stille) als 0 ausweisen */
     float over = lafmax - lim; int dist = over >= 0.0f;
     char a[16], b[16], c[16], dd[16], e[16], ov[16], row[400];
     fmt1(a, sizeof a, laeq); fmt1(b, sizeof b, lafmax); fmt1(c, sizeof c, lpk); fmt1(dd, sizeof dd, lae); fmt1(e, sizeof e, bg); fmt1(ov, sizeof ov, over);
