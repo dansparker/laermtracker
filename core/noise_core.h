@@ -37,6 +37,7 @@ typedef struct {
     uint8_t  night_end_h;      /* Nachtzeit bis                                    */
     float    lim_night_dba;    /* Grenzwert nachts (WHO 2009: 42 dB LAmax innen)   */
     float    lim_day_dba;      /* Grenzwert tags (eigene Annahme, anpassbar)       */
+    char     csv_decimal;      /* Dezimalzeichen in CSV und Plots: '.' oder ',' (deutsches Excel braucht ',') */
     float    wav_hpf_hz;       /* >0: Hochpass 2. Ordnung auf die gespeicherte WAV (entfernt DC-Offset und SD-Schreib-Wummern), 0 = Rohdaten */
 } nc_config_t;
 

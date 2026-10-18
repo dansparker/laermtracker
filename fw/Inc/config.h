@@ -16,6 +16,7 @@
 #define TRIG_MIN_DBA       50.0f
 #define PRE_MS             1000u
 #define POST_MS            3000u
+#define CSV_DECIMAL        ','      /* Dezimalzeichen in CSV: ',' fuer deutsches/oesterreichisches Excel, '.' sonst */
 #define WAV_HPF_HZ         0.0f     /* >0: Hochpass (Hz) auf die gespeicherte WAV (entfernt DC und SD-Schreibwummern); 0 = Rohdaten */
 
 /* Stoerungskriterium: LAFmax >= Grenzwert (Innenraum am Mikrofon), Zeiten lokal */

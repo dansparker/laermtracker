@@ -28,7 +28,9 @@ ungetestet auf dem echten Board. Rückmeldungen/Issues sind willkommen.
     wird nach jedem Ereignis aus `/YYMMDD/TAG.CSV` neu erzeugt
   - `/EVENTS.CSV` (alle Tage) und `/YYMMDD/TAG.CSV` (ein Tag) –
     `datum;zeit;zeitraum;aktiv_s;LAeq_dBA;LAFmax_dBA;Lpeak_dB;LAE_dBA;hintergrund_dBA;grenzwert_dBA;ueber_dB;stoerung;datei;ueberlaeufe;schreibfehler`
-    (`zeit` = Auslösezeitpunkt, `stoerung` = 1/0)
+    (`zeit` = Auslösezeitpunkt, `stoerung` = 1/0). Zahlen haben ein **Dezimalkomma**, damit deutsches/österreichisches Excel sie nicht
+    als Datum liest (`1.86` → „Jän.86“); mit `--csv-punkt` (PC) bzw. `CSV_DECIMAL '.'` (Firmware) gibt es einen Punkt.
+    Pegel unter 0 dB werden als 0 ausgewiesen (digitale Stille, kein Messwert).
 - Es wird **keine Geräuschart** bestimmt (Tür, Knall, Stimme …), nur Pegel und Zeit. Jedes Ereignis, das die Auslöseschwelle überschreitet,
   wird gespeichert; ob es eine Störung ist, entscheidet allein der LAFmax gegen den Grenzwert (siehe unten).
   Alte Dateien mit einer Spalte `typ` werden von GUI und Tagesdiagramm weiterhin gelesen.

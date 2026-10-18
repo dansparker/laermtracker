@@ -1,4 +1,10 @@
-im Ordner laermtracker:
+mit Github snychronisieren:
+cd ~/laermtracker && git pull && make -C pc clean; make -C pc
+
+optional bei Dienst:
+sudo systemctl stop laermtracker && sudo cp pc/laermtracker /opt/laermtracker/pc/laermtracker && sudo systemctl start laermtracker
+
+im Ordner laermtracker starten:
 ./pc/laermtracker --device default --sens -32 --threshold 58 --out ~/laermtracker-daten
 
 

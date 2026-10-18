@@ -38,11 +38,13 @@ int64_t nc_ms_from_civil(int y, int mo, int d, int h, int mi, int s, int msec)
     return ((days * 86400 + h * 3600 + mi * 60 + s) * 1000) + msec;
 }
 
+static char s_dec = '.';                                  /* Dezimalzeichen, aus cfg.csv_decimal */
+
 static void fmt1(char *out, size_t sz, float v)         /* "-12.3" ohne Float-printf */
 {
     int t = (int)lroundf(v * 10.0f);
     int a = t < 0 ? -t : t;
-    snprintf(out, sz, "%s%d.%d", t < 0 ? "-" : "", a / 10, a % 10);
+    snprintf(out, sz, "%s%d%c%d", t < 0 ? "-" : "", a / 10, s_dec, a % 10);
 }
 
 static void put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
@@ -137,6 +139,7 @@ void nc_default_config(nc_config_t *c)
     c->lim_night_dba = 42.0f;
     c->lim_day_dba = 55.0f;
     c->wav_hpf_hz = 0.0f;
+    c->csv_decimal = '.';
 }
 
 void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, uint32_t ring_len)
@@ -149,6 +152,7 @@ void nc_init(nc_t *n, const nc_config_t *c, const nc_io_t *io, int16_t *ring, ui
     n->ref_peak = (float)ref_pk;
     n->ref_rms2 = (float)(ref_pk * ref_pk / 2.0);
     aw_init(n->aw, c->fs);
+    s_dec = c->csv_decimal == ',' ? ',' : '.';
     if (c->wav_hpf_hz > 0.0f) {                                /* Butterworth-Hochpass 2. Ordnung */
         double w0 = 2.0 * PI_F * c->wav_hpf_hz / c->fs, cw = cos(w0), al = sin(w0) / (2.0 * 0.70710678);
         double a0 = 1.0 + al;
@@ -362,7 +366,7 @@ static int parse10(const char *p)                           /* "-12.3" -> -123 *
     if (*p == '-') { neg = 1; p++; }
     while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
     v *= 10;
-    if (*p == '.' && p[1] >= '0' && p[1] <= '9') v += p[1] - '0';
+    if ((*p == '.' || *p == ',') && p[1] >= '0' && p[1] <= '9') v += p[1] - '0';
     return neg ? -v : v;
 }
 
@@ -529,7 +533,7 @@ static void finish_event_inner(nc_t *n)
 
     char dur[16], lp[16], bgs[16], lm[16], ov[16], row[256];
     uint32_t cs = n->ev_last_L + 1 - n->ev_trig_frame;   /* aktive Dauer in 10-ms-Frames */
-    snprintf(dur, sizeof dur, "%lu.%02lu", (unsigned long)(cs / 100), (unsigned long)(cs % 100));
+    snprintf(dur, sizeof dur, "%lu%c%02lu", (unsigned long)(cs / 100), s_dec, (unsigned long)(cs % 100));
     fmt1(lp, sizeof lp, lae); fmt1(bgs, sizeof bgs, n->ev_bg);
     fmt1(lm, sizeof lm, lim); fmt1(ov, sizeof ov, n->ev_lafmax - lim);
     snprintf(row, sizeof row, "%04d-%02d-%02d;%02d:%02d:%02d.%03d;%s;%s;%s;%s;%s;%s;%s;%s;%s;%d;/%s/%s.WAV;%lu;%lu\n",
@@ -635,14 +639,18 @@ static void frame_consume(nc_t *n, const nc_frame_t *fr)
     if (meansq < 1e-3) meansq = 1e-3;
     float cal = NC_REF_SPL_DB + n->cfg.cal_offset_db;
     float L = 10.0f * log10f((float)meansq / n->ref_rms2) + cal;
+    if (L < 0.0f) L = 0.0f;                                    /* Messbereichsuntergrenze (digitale Stille) */
     float pk = fr->peak < 1 ? 1.0f : fr->peak;
     float lpk = 20.0f * log10f(pk / n->ref_peak) + cal;
+    if (lpk < 0.0f) lpk = 0.0f;
 
     const float alpha = 1.0f - expf(-0.010f / 0.125f);     /* Fast: tau = 125 ms */
     if (n->frames_seen == 0) n->laf_energy = n->lafc_energy = (float)meansq;
     else { n->laf_energy += alpha * ((float)meansq - n->laf_energy); if (!blank) n->lafc_energy += alpha * ((float)meansq - n->lafc_energy); }
     float laf = 10.0f * log10f(n->laf_energy / n->ref_rms2) + cal;
+    if (laf < 0.0f) laf = 0.0f;
     float laf_act = 10.0f * log10f(n->lafc_energy / n->ref_rms2) + cal;
+    if (laf_act < 0.0f) laf_act = 0.0f;
     float lafc = laf < 0 ? 0 : laf;
     n->hist[n->hist_n % NC_HIST_FRAMES] = (uint16_t)(lafc * 10.0f + 0.5f);
     n->hist_n++;

@@ -279,7 +279,7 @@ int main(void)
     cfg.fs = SAMPLE_RATE_HZ; cfg.cal_offset_db = CAL_OFFSET_DB; cfg.trig_delta_db = TRIG_DELTA_DB;
     cfg.trig_min_dba = TRIG_MIN_DBA; cfg.pre_ms = PRE_MS; cfg.post_ms = POST_MS;
     cfg.night_start_h = NIGHT_START_H; cfg.night_end_h = NIGHT_END_H;
-    cfg.lim_night_dba = LIM_NIGHT_DBA; cfg.lim_day_dba = LIM_DAY_DBA; cfg.wav_hpf_hz = WAV_HPF_HZ;
+    cfg.lim_night_dba = LIM_NIGHT_DBA; cfg.lim_day_dba = LIM_DAY_DBA; cfg.wav_hpf_hz = WAV_HPF_HZ; cfg.csv_decimal = CSV_DECIMAL;
     nc_io_t io = { NULL, rtc_now_ms, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
     nc_init(&nc, &cfg, &io, ring, RING_SAMPLES);
 

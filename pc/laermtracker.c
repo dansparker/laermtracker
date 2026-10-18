@@ -328,6 +328,7 @@ int main(int argc, char **argv)
                "  --trig-min dBA (50)  --trig-delta dB (12)  --pre-ms (1000)  --post-ms (3000)  --max-ms (60000)\n"
                "  --threshold dBA         fester Ausloesepegel (wie --trig-min dBA --trig-delta 0); Ausloesung ab diesem LAeq(10 ms) in dB(A)\n"
                "  --status-s N            Pegelanzeige alle N Sekunden (0 = aus, Standard 1)\n"
+               "  --csv-punkt             Dezimalpunkt statt Dezimalkomma in CSV und Plots (Standard: Komma, fuer deutsches Excel)\n"
                "  --log                   zeilenweise Ausgabe mit Uhrzeit statt ueberschreibender Zeile (systemd, Logdateien)\n"
                "  --night-start h (22)  --night-end h (6)  --lim-night dBA (42)  --lim-day dBA (55)\n"
                "  --recalibrate dB        vorhandene Ergebnisse im --out-Ordner nachtraeglich um dB korrigieren (CSV, Plots, Stoerungen neu; Original: EVENTS_ALT.CSV)\n"
@@ -372,6 +373,7 @@ int main(int argc, char **argv)
     cfg.lim_day_dba = (float)optd("--lim-day", cfg.lim_day_dba);
     if (opt("--threshold")) { cfg.trig_min_dba = (float)optd("--threshold", 50); cfg.trig_delta_db = 0.0f; }   /* fester Ausloesepegel */
     g_status_ms = (int)(optd("--status-s", 1.0) * 1000.0); g_log_lines = flag("--log");
+    cfg.csv_decimal = flag("--csv-punkt") ? '.' : ',';                  /* Excel (de/at) erwartet Dezimalkomma */
 
     uint32_t ring_len = g_fs * 4;                                           /* 4 s Ringpuffer */
     int16_t *ring = malloc((size_t)ring_len * 2);

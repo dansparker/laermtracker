@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Prueft die Ausgabe der PC-Version (WAV-Eingabe-Test)."""
-import glob, os, sys, wave
+import glob, os, re, sys, wave
+fl = lambda x: float(x.replace(',', '.'))
 import xml.etree.ElementTree as ET
 out = sys.argv[1]
 bad = 0
@@ -11,8 +12,10 @@ rows = [r.split(";") for r in open(os.path.join(out, "EVENTS.CSV"), encoding="ut
 head, ev = rows[0], rows[1:]
 check(len(head) == 15 and len(ev) == 3, f"EVENTS.CSV: {len(ev)} Ereignisse, {len(head)} Spalten (erwartet 3 / 15)")
 if len(ev) == 3:
-    laf = [float(r[5]) for r in ev]; zr = [r[2] for r in ev]; st = [r[11] for r in ev]
+    laf = [fl(r[5]) for r in ev]; zr = [r[2] for r in ev]; st = [r[11] for r in ev]
     check("typ" not in head, "keine Spalte 'typ' mehr")
+    sep = r"\." if len(sys.argv) > 2 and sys.argv[2] == "punkt" else ","
+    check(all(re.fullmatch(r"-?\d+" + sep + r"\d", r[i]) for r in ev for i in (4, 5, 6, 7, 8, 9, 10)), "Dezimalzeichen in den Zahlenspalten: " + ("Punkt" if sep != "," else "Komma"))
     check(50 <= laf[0] < 75 and laf[1] > 75 and laf[2] > 75, f"LAFmax {laf}")
     check(zr == ["TAG", "TAG", "NACHT"], f"Zeitraum {zr} (Uhr lief ab 21:59:30)")
     check(st[1] == "1" and st[2] == "1", f"Stoerung bei den lauten Ereignissen {st}")

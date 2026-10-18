@@ -236,7 +236,7 @@ static int start_job(int mode)
     int sel = (int)SendMessageW(g_dev, CB_GETCURSEL, 0, 0); g_dev_index = sel - 1;     /* 0 = Standardgerät */
     double sens = edit_d(g_sens, NC_MIC_SENS_DBFS);
     g_cal_db = (float)(-sens - 26.0 + edit_d(g_korr, 0));        /* Korrektur wirkt wie eine feinere Kalibrierung */
-    nc_config_t cfg; nc_default_config(&cfg);
+    nc_config_t cfg; nc_default_config(&cfg); cfg.csv_decimal = ',';
     cfg.fs = g_fs; cfg.cal_offset_db = g_cal_db;
     cfg.trig_min_dba = (float)edit_d(g_trigmin, 50); cfg.trig_delta_db = (float)edit_d(g_delta, 12);
     cfg.post_ms = (uint32_t)(edit_d(g_post, 3) * 1000.0);
@@ -445,7 +445,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
             wchar_t ow[600]; GetWindowTextW(g_out_e, ow, 600); w2u(ow, g_out, sizeof g_out);
             SetCursor(LoadCursorW(NULL, IDC_WAIT));
             static int16_t dummy[1024];
-            nc_config_t cfg; nc_default_config(&cfg); cfg.fs = g_fs;
+            nc_config_t cfg; nc_default_config(&cfg); cfg.csv_decimal = ','; cfg.fs = g_fs;
             nc_io_t io = { NULL, io_now, io_mkdir, io_open, io_write, io_seek, io_close, io_read, io_remove };
             g_sim = 0; nc_init(&g_nc, &cfg, &io, dummy, 1024);
             nc_recal_t r; int rc = nc_recalibrate(&g_nc, (float)dl, &r);
