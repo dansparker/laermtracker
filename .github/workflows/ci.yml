@@ -107,3 +107,28 @@ jobs:
           path: |
             laermtracker.exe
             laermtracker-gui.exe
+  auswertung:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Pakete installieren
+        run: pip install pandas matplotlib
+      - name: Auswertung testen (Komma, Punkt, altes Format mit Spalte typ)
+        shell: bash
+        run: |
+          python tests/make_test_csv.py td_komma komma
+          python tests/make_test_csv.py td_punkt punkt
+          python tests/make_test_csv.py td_alt komma alt
+          for d in td_komma td_punkt td_alt; do
+            python tools/auswertung.py $d --kein-fenster
+            ls $d/auswertung | wc -l
+            test -f $d/auswertung/auswertung.pdf && test -f $d/auswertung/kennzahlen.txt && test -f $d/auswertung/10_wochentage.png
+          done
+          python tools/auswertung.py td_komma --von 2026-10-08 --bis 2026-10-10 --ausgabe td_komma/teil --kein-fenster
+      - uses: actions/upload-artifact@v4
+        with:
+          name: auswertung-beispiel
+          path: td_komma/auswertung/
