@@ -24,6 +24,7 @@ try:
     import pandas as pd
     import matplotlib
     matplotlib.use("Agg")
+    import matplotlib.ticker
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 except ImportError as e:                                            # pragma: no cover
@@ -161,7 +162,7 @@ def fig_pro_tag(df, tage):
         unten += v
     ax.axhline(unten.mean(), color="k", ls="--", lw=1, label="Mittel %.1f/Tag" % unten.mean())
     ax.set_title("Ereignisse pro Tag"); ax.set_ylabel("Anzahl Ereignisse"); ax.legend(ncol=5, fontsize=8)
-    ax.set_xticks(tage[:: max(1, len(tage) // 20)]); ax.set_xticklabels([d.strftime("%d.%m.\n%a")[:8] for d in tage[:: max(1, len(tage) // 20)]], fontsize=8)
+    ax.set_xticks(tage[:: max(1, len(tage) // 20)]); ax.set_xticklabels([WOCHENTAGE[d.dayofweek] + d.strftime("\n%d.%m.") for d in tage[:: max(1, len(tage) // 20)]], fontsize=8)
     ax.grid(axis="y", alpha=.3)
     return f
 
@@ -183,9 +184,10 @@ def fig_heatmap(df, tage):
     im = ax.imshow(pv.values, aspect="auto", cmap="YlOrRd", interpolation="nearest")
     ax.set_xticks(range(24)); ax.set_xticklabels(["%02d" % i for i in range(24)])
     step = max(1, len(tage) // 40)
-    ax.set_yticks(range(0, len(tage), step)); ax.set_yticklabels([tage[i].strftime("%a %d.%m.") for i in range(0, len(tage), step)], fontsize=8)
+    ax.set_yticks(range(0, len(tage), step)); ax.set_yticklabels([WOCHENTAGE[tage[i].dayofweek] + tage[i].strftime(" %d.%m.") for i in range(0, len(tage), step)], fontsize=8)
     ax.set_xlabel("Uhrzeit (Stunde)"); ax.set_title("Ereignisse je Tag und Stunde (Muster, z. B. regelmaessige Zeiten)")
-    f.colorbar(im, ax=ax, label="Anzahl")
+    cb = f.colorbar(im, ax=ax, label="Anzahl")
+    cb.locator = matplotlib.ticker.MaxNLocator(integer=True); cb.update_ticks()
     return f
 
 
@@ -226,7 +228,8 @@ def fig_rhythmus(df):
         ab = (df["dt"].diff().dt.total_seconds().dropna() / 60.0)
         ab = ab[ab > 0]
         a2.hist(ab, bins=np.logspace(np.log10(max(ab.min(), 0.05)), np.log10(max(ab.max(), 1)), 40), color=C_OK)
-        a2.set_xscale("log"); a2.set_xlabel("Abstand zum vorigen Ereignis [min] (log)"); a2.set_ylabel("Anzahl"); a2.set_title("Zeitliche Abstaende"); a2.grid(alpha=.3)
+        a2.set_xscale("log"); a2.set_xticks([t for t in (1, 2, 5, 10, 30, 60, 120, 300, 600, 1440) if ab.min() / 2 <= t <= ab.max() * 2])
+        a2.xaxis.set_major_formatter(matplotlib.ticker.ScalarFormatter()); a2.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter()); a2.set_xlabel("Abstand zum vorigen Ereignis [min] (log)"); a2.set_ylabel("Anzahl"); a2.set_title("Zeitliche Abstaende"); a2.grid(alpha=.3)
     return f
 
 
