@@ -117,6 +117,17 @@ laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe  
 - Getestet in der CI: Analyse einer synthetischen Aufnahme (Tür, Knall, Knall nachts) unter Windows und Linux. Das Mikrofon
   selbst (WinMM/ALSA) ist ungetestet auf echter Hardware.
 
+## Statistische Auswertung (Python, Windows/Linux)
+`tools/auswertung.py` wertet `EVENTS.CSV` aus (Komma- oder Punkt-Dezimal, alte und neue Spaltenlayouts) und erzeugt 10 Diagramme (PNG + `auswertung.pdf`),
+`kennzahlen.txt` und `tages_statistik.csv`: Ereignisse pro Tag, Tagesgang, Heatmap Tag × Stunde, Pegelverteilung, Pegel über Uhrzeit,
+Rhythmus (Minute der Stunde, Abstände), Nächte, täglicher Ereignispegel (aus LAE), Dauer vs. Pegel, Wochentage.
+```
+pip install pandas matplotlib
+python toolsuswertung.py D:\laerm\daten          # Ordner mit EVENTS.CSV; ohne Angabe öffnet sich eine Ordnerauswahl
+python toolsuswertung.py D:\laerm\daten --von 2026-10-01 --bis 2026-10-14
+```
+Die CSV nicht mit Excel speichern (Excel macht aus `1,86` ein Datum); Original verwenden.
+
 ## Aufbau
 - `core/noise_core.[ch]` – hardwareunabhängig. `nc_push24()` läuft im DMA-Interrupt (A-Filter, 10-ms-Frames,
   Ringpuffer), `nc_poll()` in der Hauptschleife (Zustandsautomat, Dateizugriffe; darf auf die SD warten, ohne Samples zu verlieren).
