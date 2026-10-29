@@ -5,7 +5,6 @@ rem  Datei ziehen. Ohne Angabe oeffnet sich ein Dialog zur Ordnerauswahl.
 rem  Beim ersten Start werden pandas und matplotlib automatisch installiert.
 rem ---------------------------------------------------------------------------
 setlocal
-cd /d "%~dp0"
 
 rem Python finden: erst "py" (Windows-Launcher), dann "python"
 set "PY="
