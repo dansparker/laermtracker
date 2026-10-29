@@ -1,0 +1,27 @@
+LAERMTRACKER - AUSWERTUNG
+============================================================
+Zeitraum:            05.10.2026 08:02 bis 18.10.2026 21:00 (14 Tage, 14 Tage mit Ereignissen)
+Ereignisse gesamt:   217  (15.5 je Tag, Median 15, Maximum 22 an 09.10.2026)
+davon Stoerungen:    176 (81 %)  [LAFmax >= Grenzwert]
+davon nachts:        23 (11 %), Stoerungen nachts: 22
+davon tagsueber:     194 (89 %), Stoerungen tags:   154
+
+LAFmax je Ereignis [dB(A)]:  Median 60.7 | 90%: 74.5 | 95%: 76.0 | Maximum 85.3
+  nachts     Median 53.3 | Maximum 78.2 | Anzahl 23
+  tagsueber  Median 62.1 | Maximum 85.3 | Anzahl 194
+
+Beitrag der Ereignisse zum Mittelungspegel (aus LAE, ueber den ganzen Zeitraum):
+  Tag   (06-22 Uhr): 32.9 dB(A)
+  Nacht (22-06 Uhr): 21.8 dB(A)
+  (nur die aufgezeichneten Ereignisse, ohne Hintergrundgeraeusch)
+
+Haeufigste Stunden:  17-18 Uhr (15), 20-21 Uhr (15), 15-16 Uhr (15)
+Haeufigste Minuten (Minute der Stunde): :00 (58), :30 (45), :32 (32), :31 (30)
+Anteil Ereignisse um :00 oder :30 (+-2 min): 100 %  (bei gleichmaessiger Verteilung waeren es etwa 17 %)
+Abstand zwischen Ereignissen: Median 59.6 min, 25%: 30.1 min, 75%: 90.7 min
+Trend Ereignisse je Tag: -0.16 pro Tag (etwa gleichbleibend)
+Ereignisse je Wochentag (Mittel): Mo 15.5, Di 16.5, Mi 11.0, Do 16.5, Fr 18.5, Sa 15.5, So 15.0
+
+Auffaelligste Naechte (Beginn am Abend): 07.10.: 5 Ereignisse, 5 Stoerungen, max 69.2 dB(A); 09.10.: 4 Ereignisse, 4 Stoerungen, max 78.2 dB(A); 08.10.: 2 Ereignisse, 2 Stoerungen, max 67.8 dB(A)
+
+Hinweis: Pegel unkalibriert/indikativ: Messwerte eines MEMS- bzw. USB-Mikrofons, kein geeichtes Schallpegelmessgeraet; LAFmax = hoechster A-bewerteter Pegel (Fast, 125 ms).
