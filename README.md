@@ -118,7 +118,7 @@ laermtracker --wav-in aufnahme.wav --start "2026-10-03 21:59:30" --out ausgabe  
   selbst (WinMM/ALSA) ist ungetestet auf echter Hardware.
 
 ## Statistische Auswertung (Python, Windows/Linux)
-`tools/auswertung.py` wertet `EVENTS.CSV` aus (Komma- oder Punkt-Dezimal, alte und neue Spaltenlayouts) und erzeugt 10 Diagramme (PNG + `auswertung.pdf`),
+`tools/auswertung.py` wertet `EVENTS.CSV` aus (Komma- oder Punkt-Dezimal, alte und neue Spaltenlayouts) und erzeugt 11 Diagramme (u. a. Spitzenpegel Lpeak) (PNG + `auswertung.pdf`),
 `kennzahlen.txt` und `tages_statistik.csv`: Ereignisse pro Tag, Tagesgang, Heatmap Tag × Stunde, Pegelverteilung, Pegel über Uhrzeit,
 Rhythmus (Minute der Stunde, Abstände), Nächte, täglicher Ereignispegel (aus LAE), Dauer vs. Pegel, Wochentage.
 ```

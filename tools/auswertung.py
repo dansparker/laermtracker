@@ -116,6 +116,14 @@ def kennzahlen(df, nacht_start, nacht_ende):
     for name, m in (("nachts", df["nacht"]), ("tagsueber", ~df["nacht"])):
         if m.any():
             z.append("  %-10s Median %.1f | Maximum %.1f | Anzahl %d" % (name, lf[m].median(), lf[m].max(), m.sum()))
+    lp = df["lpeak_db"].dropna()
+    if len(lp):
+        z.append("Lpeak je Ereignis [dB]:      Median %.1f | 90%%: %.1f | 95%%: %.1f | Maximum %.1f  (Spitzenpegel, unbewertet/Z)" % (
+            lp.median(), lp.quantile(0.9), lp.quantile(0.95), lp.max()))
+        z.append("  Lpeak - LAFmax: Median %.1f dB (hoch = impulshaft)" % (df["lpeak_db"] - lf).median())
+        if "aktiv_s" in df and df["aktiv_s"].notna().any():
+            z.append("  Ereignisse unter 1 s aktiv: %.0f %%" % (100.0 * (df["aktiv_s"].dropna() < 1.0).mean()))
+        z.append("  Lpeak ueber 70 dB: %d | ueber 80 dB: %d" % ((lp > 70).sum(), (lp > 80).sum()))
     z.append("")
     z.append("Beitrag der Ereignisse zum Mittelungspegel (aus LAE, ueber den ganzen Zeitraum):")
     z.append("  Tag   (%02d-%02d Uhr): %.1f dB(A)" % (nacht_ende, nacht_start, pegelsumme(df.loc[~df["nacht"], "lae_dba"], t_tag * n_tage)))
@@ -137,7 +145,7 @@ def kennzahlen(df, nacht_start, nacht_ende):
         k = np.polyfit(np.arange(n_tage), pro_tag.values, 1)[0]
         z.append("Trend Ereignisse je Tag: %+.2f pro Tag (%s)" % (k, "zunehmend" if k > 0.2 else ("abnehmend" if k < -0.2 else "etwa gleichbleibend")))
     wd = df.groupby("wochentag").size().reindex(range(7), fill_value=0)
-    nwd = pd.Series([int(((tage.dayofweek) == i).sum()) for i in range(7)], index=range(7)).replace(0, np.nan)
+    nwd = pd.Series([int(((tage.day_of_week) == i).sum()) for i in range(7)], index=range(7)).replace(0, np.nan)
     z.append("Ereignisse je Wochentag (Mittel): " + ", ".join("%s %.1f" % (WOCHENTAGE[i], (wd[i] / nwd[i]) if nwd[i] == nwd[i] else 0) for i in range(7)))
     nn = df[df["nacht"]].groupby("nachttag").agg(n=("dt", "size"), mx=("lafmax_dba", "max"), st=("stoerung", "sum"))
     if len(nn):
@@ -202,6 +210,26 @@ def fig_pegel(df):
     a1.set_xlabel("LAFmax [dB(A)]"); a1.set_ylabel("Anzahl"); a1.set_title("Pegelverteilung der Ereignisse"); a1.legend()
     s = np.sort(df["lafmax_dba"].values); a2.plot(s, 100.0 * (1 - np.arange(1, len(s) + 1) / len(s)), color="k")
     a2.set_xlabel("LAFmax [dB(A)]"); a2.set_ylabel("Anteil der Ereignisse darueber [%]"); a2.set_title("Ueberschreitungshaeufigkeit"); a2.grid(alpha=.3)
+    return f
+
+
+def fig_lpeak(df):
+    d = df.dropna(subset=["lpeak_db"])
+    f, (a1, a2, a3) = plt.subplots(1, 3, figsize=(15, 5))
+    if d.empty:
+        a1.text(.5, .5, "Keine Lpeak-Werte in der CSV", ha="center"); return f
+    bins = np.arange(np.floor(d["lpeak_db"].min() / 2) * 2, d["lpeak_db"].max() + 4, 2)
+    a1.hist([d.loc[~d["nacht"], "lpeak_db"], d.loc[d["nacht"], "lpeak_db"]], bins=bins, stacked=True, color=[C_OK, C_NACHT], label=["Tag", "Nacht"])
+    a1.set_xlabel("Lpeak [dB]"); a1.set_ylabel("Anzahl"); a1.set_title("Spitzenpegel der Ereignisse"); a1.legend()
+    a2.scatter(d["lafmax_dba"], d["lpeak_db"], s=16, c=np.where(d["stoerung"], C_ST, C_OK), alpha=.6)
+    lo, hi = d["lafmax_dba"].min(), d["lafmax_dba"].max()
+    a2.plot([lo, hi], [lo, hi], "k:", lw=1); a2.plot([lo, hi], [lo + 10, hi + 10], "k--", lw=1)
+    a2.text(lo, hi + 10, " +10 dB: impulshaft", fontsize=8, va="bottom")
+    a2.set_xlabel("LAFmax [dB(A)]"); a2.set_ylabel("Lpeak [dB]"); a2.set_title("Spitze gegen LAFmax (rot = Stoerung)"); a2.grid(alpha=.3)
+    x = d["stunde"] + d["minute"] / 60.0
+    a3.scatter(x, d["lpeak_db"], s=16, c=C_OK, alpha=.6)
+    a3.set_xlim(0, 24); a3.set_xticks(range(0, 25, 2)); a3.set_xlabel("Uhrzeit"); a3.set_ylabel("Lpeak [dB]")
+    a3.set_title("Spitzenpegel ueber der Tageszeit"); a3.grid(alpha=.3)
     return f
 
 
@@ -273,7 +301,7 @@ def fig_dauer(df):
 
 def fig_wochentage(df, tage):
     f, ax = plt.subplots(figsize=(8, 5))
-    nwd = np.array([max(1, int(((tage.dayofweek) == i).sum())) for i in range(7)])
+    nwd = np.array([max(1, int(((tage.day_of_week) == i).sum())) for i in range(7)])
     tag = np.array([((df["wochentag"] == i) & ~df["nacht"]).sum() for i in range(7)]) / nwd
     nacht = np.array([((df["wochentag"] == i) & df["nacht"]).sum() for i in range(7)]) / nwd
     ax.bar(range(7), tag, color=C_OK, label="Tag"); ax.bar(range(7), nacht, bottom=tag, color=C_NACHT, label="Nacht")
@@ -327,6 +355,7 @@ def main():
     tag_tab["stoerungen"] = g["stoerung"].sum().reindex(tage, fill_value=0)
     tag_tab["lafmax_max"] = g["lafmax_dba"].max().reindex(tage)
     tag_tab["lafmax_median"] = g["lafmax_dba"].median().reindex(tage)
+    tag_tab["lpeak_max"] = g["lpeak_db"].max().reindex(tage)
     tag_tab["nachts"] = df[df["nacht"]].groupby("tag").size().reindex(tage, fill_value=0)
     tag_tab.index.name = "datum"
     tag_tab.round(1).to_csv(os.path.join(ausgabe, "tages_statistik.csv"), sep=";", decimal=",", encoding="utf-8-sig")
@@ -334,7 +363,7 @@ def main():
     figs = [("01_ereignisse_pro_tag", fig_pro_tag(df, tage)), ("02_tagesgang_stunden", fig_stunden(df)), ("03_heatmap_tag_stunde", fig_heatmap(df, tage)),
             ("04_pegelverteilung", fig_pegel(df)), ("05_pegel_ueber_uhrzeit", fig_pegel_uhrzeit(df)), ("06_rhythmus_minute_abstaende", fig_rhythmus(df)),
             ("07_naechte", fig_naechte(df)), ("08_tagespegel_ereignisse", fig_tagespegel(df, tage, a.nacht_start, a.nacht_ende)),
-            ("09_dauer_und_pegel", fig_dauer(df)), ("10_wochentage", fig_wochentage(df, tage))]
+            ("09_dauer_und_pegel", fig_dauer(df)), ("10_wochentage", fig_wochentage(df, tage)), ("11_spitzenpegel_lpeak", fig_lpeak(df))]
     with PdfPages(os.path.join(ausgabe, "auswertung.pdf")) as pdf:
         t = fig_text(text); pdf.savefig(t); plt.close(t)
         for name, f in figs:
